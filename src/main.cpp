@@ -1,14 +1,12 @@
 #include <Arduino.h>
 #include "PinConfig.h"
 #include "TestMode.h"
-#include "RS485Comms.h"
-
 
 // Toggle these booleans as desired.
-bool sensorTestMode = false;   // Enable sensor test mode?
-bool displayTestMode  = false;   // Enable display test mode (counter and 7-seg refresh)?
-bool relayTestMode    = false;   // Enable relay test mode (button processing)?
-bool diTestMode       = false;   // Enable digital input (DI) test mode?
+bool sensorTestMode = true;   // Enable sensor test mode?
+bool displayTestMode  = true;   // Enable display test mode (counter and 7-seg refresh)?
+bool relayTestMode    = true;   // Enable relay test mode (button processing)?
+bool diTestMode       = true;   // Enable digital input (DI) test mode?
 
 // Sensor Task: runs sensorTestLoop repeatedly.
 void vSensorTask(void *pvParameters) {
@@ -49,9 +47,6 @@ void vDITask(void *pvParameters) {
 void setup() {
   Serial.begin(115200);
   Serial.println("Device Starting...");
-
-  // Create the RS485 task.
-  xTaskCreate(rs485Task, "RS485Task", 4096, NULL, 1, NULL);
 
   // Initialize keys for relay test.
   pinMode(KEY1, INPUT_PULLUP);
