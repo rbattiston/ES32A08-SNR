@@ -2,6 +2,10 @@
 #include "PinConfig.h"
 #include "TestMode.h"
 
+#define RS485_RX_PIN 3   // GPIO3 (RX0)
+#define RS485_TX_PIN 1   // GPIO1 (TX0)
+#define RS485_DE_PIN 22  // GPIO22 for DE/RE control
+
 // Toggle these booleans as desired.
 bool sensorTestMode = true;   // Enable sensor test mode?
 bool displayTestMode  = true;   // Enable display test mode (counter and 7-seg refresh)?
@@ -82,5 +86,5 @@ void setup() {
 
 void loop() {
   // Main loop yields to the FreeRTOS scheduler.
-  vTaskDelay(1000 / portTICK_PERIOD_MS);
+  vTaskDelay(pdMS_TO_TICKS(1000)); // Prevent watchdog issues}
 }
