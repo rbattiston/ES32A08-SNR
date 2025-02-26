@@ -1,0 +1,335 @@
+/* Scheduler Specific Styles */
+
+/* Tab Controls */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 20px;
+}
+
+.tab-button {
+  padding: 10px 15px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-color);
+  opacity: 0.7;
+  border-bottom: 2px solid transparent;
+  transition: all 0.3s ease;
+}
+
+.tab-button:hover {
+  opacity: 1;
+}
+
+.tab-button.active {
+  opacity: 1;
+  border-bottom: 2px solid var(--primary-color);
+  color: var(--primary-color);
+}
+
+.tab-content {
+  display: none;
+  padding: 10px 0;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* Schedule List */
+.schedule-list {
+  margin-bottom: 20px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+}
+
+.schedule-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.schedule-item:last-child {
+  border-bottom: none;
+}
+
+.schedule-details {
+  flex: 1;
+}
+
+.schedule-title {
+  font-weight: 500;
+  margin-bottom: 5px;
+}
+
+.schedule-subtitle {
+  font-size: 0.9rem;
+  color: var(--secondary-color);
+}
+
+.schedule-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.schedule-actions button {
+  padding: 5px 10px;
+  font-size: 0.8rem;
+}
+
+/* Input Group */
+.input-group {
+  display: flex;
+  align-items: center;
+}
+
+.input-group input {
+  flex: 1;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.input-group select,
+.input-group-text {
+  width: auto;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  background-color: var(--secondary-color);
+  color: white;
+  border: 1px solid var(--secondary-color);
+  padding: 10px;
+}
+
+.input-group select {
+  cursor: pointer;
+}
+
+/* Template Controls */
+.template-controls {
+  margin-bottom: 20px;
+}
+
+.template-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.template-item {
+  padding: 15px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.template-item:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.template-item.selected {
+  border-color: var(--primary-color);
+  background-color: rgba(0, 123, 255, 0.1);
+}
+
+/* Calendar */
+.calendar-grid {
+  margin-top: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.calendar-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background-color: var(--secondary-color);
+  color: white;
+}
+
+.calendar-header div {
+  padding: 10px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.calendar-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.calendar-day {
+  padding: 10px;
+  border-right: 1px solid var(--border-color);
+  min-height: 100px;
+}
+
+.calendar-day:last-child {
+  border-right: none;
+}
+
+.calendar-date {
+  font-weight: 500;
+  margin-bottom: 5px;
+  text-align: center;
+}
+
+.calendar-events {
+  font-size: 0.8rem;
+}
+
+.calendar-event {
+  padding: 3px 5px;
+  background-color: rgba(0, 123, 255, 0.1);
+  border-left: 3px solid var(--primary-color);
+  margin-bottom: 2px;
+  border-radius: 2px;
+  font-size: 0.75rem;
+}
+
+/* Status Display */
+.status-display {
+  margin-bottom: 20px;
+}
+
+.status-item {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.status-label {
+  font-weight: 500;
+  min-width: 150px;
+}
+
+.status-value {
+  font-family: monospace;
+}
+
+/* Button Modifiers */
+.btn-success {
+  background-color: var(--success-color);
+}
+
+.btn-success:hover {
+  background-color: #218838;
+}
+
+.btn-danger {
+  background-color: var(--danger-color);
+}
+
+.btn-danger:hover {
+  background-color: #c82333;
+}
+
+.btn-primary {
+  background-color: var(--primary-color);
+}
+
+.btn-primary:hover {
+  background-color: #0069d9;
+}
+
+/* Modal */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.4);
+  animation: fadeIn 0.3s;
+}
+
+.modal-content {
+  position: relative;
+  background-color: var(--card-background);
+  margin: 10% auto;
+  padding: 20px;
+  border-radius: 5px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  max-width: 500px;
+  animation: slideIn 0.3s;
+}
+
+.close-modal {
+  position: absolute;
+  right: 15px;
+  top: 10px;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+  color: var(--secondary-color);
+}
+
+.close-modal:hover {
+  color: var(--danger-color);
+}
+
+.modal-controls {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.template-selection {
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 15px 0;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { transform: translateY(-30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+  .tabs {
+    flex-direction: column;
+  }
+  
+  .tab-button {
+    width: 100%;
+    text-align: center;
+    padding: 10px;
+  }
+  
+  .status-item {
+    flex-direction: column;
+  }
+  
+  .status-label {
+    margin-bottom: 5px;
+  }
+  
+  .template-controls .controls {
+    flex-direction: column;
+  }
+  
+  .template-controls .controls button {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+}
