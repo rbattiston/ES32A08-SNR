@@ -139,19 +139,12 @@ async function saveWifiConfig() {
 
 // Function to test WiFi connection
 async function testConnection() {
-  const ssid = wifiSsidInput.value.trim();
-  const password = wifiPasswordInput.value;
-  
-  // Basic validation
-  if (!ssid) {
-    showStatus('Please enter a WiFi network name (SSID).', 'error');
-    return;
-  }
-  
-  // Show loading status
-  showStatus('Testing WiFi connection...', 'info');
-  
   try {
+    const ssid = document.getElementById('wifi-ssid').value.trim();
+    const password = document.getElementById('wifi-password').value;
+    
+    showStatus('Testing WiFi connection...', 'info');
+    
     const response = await fetch('/api/wifi/test', {
       method: 'POST',
       headers: {
@@ -163,19 +156,15 @@ async function testConnection() {
       })
     });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    
     const data = await response.json();
     
-    if (data.status === 'success') {
+    if (data.status === 'pending') {
+      // Start polling for status
+      showStatus('Test in progress, please wait...', 'info');
+      pollWiFiStatus();
+    } else if (data.status === 'success') {
       showStatus(`Connection successful! IP Address: ${data.ip}`, 'success');
-      
-      // Update status display
-      staStatusElement.textContent = `Connected to ${ssid}`;
-      staStatusElement.className = 'status-on';
-      staIpElement.textContent = data.ip;
+      updateStatusDisplay(data);
     } else {
       showStatus(`Connection failed: ${data.message}`, 'error');
     }
@@ -185,6 +174,35 @@ async function testConnection() {
   }
 }
 
+// Poll for WiFi status changes
+function pollWiFiStatus() {
+  const pollInterval = setInterval(async () => {
+    try {
+      const response = await fetch('/api/wifi/status');
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // If connected to a new network
+      if (data.staConnected) {
+        clearInterval(pollInterval);
+        showStatus(`Connection successful! IP Address: ${data.staIp}`, 'success');
+        updateStatusDisplay(data);
+      }
+    } catch (error) {
+      console.warn('Error polling WiFi status:', error);
+      // Don't stop polling on error
+    }
+  }, 2000); // Poll every 2 seconds
+  
+  // Stop polling after 30 seconds
+  setTimeout(() => {
+    clearInterval(pollInterval);
+    showStatus('WiFi test timed out. Please try again.', 'error');
+  }, 30000);
+}
 // Add event listeners
 saveWifiConfigButton.addEventListener('click', saveWifiConfig);
 testConnectionButton.addEventListener('click', testConnection);

@@ -6,6 +6,8 @@
 #include "PinConfig.h"
 #include "TestMode.h"
 #include <time.h>
+#include "esp_task_wdt.h"
+#include "esp_system.h"
 
 // WiFi settings
 const char* ssid = "ES32A08-Setup"; // Default AP SSID
@@ -249,133 +251,117 @@ void handleSetWiFiCredentials(AsyncWebServerRequest *request, uint8_t *data, siz
 }
 
 // Handler for testing a WiFi connection
-void handleTestWiFiConnection(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  debugPrintln("DEBUG: API request received: /api/wifi/test");
+// Use a global flag to track if a WiFi test is in progress
+volatile bool wifiTestInProgress = false;
+
+// Helper function to create parameter block
+void* createWiFiTestParam(const char* ssid, const char* password) {
+  size_t ssidLen = strlen(ssid);
+  size_t passLen = strlen(password);
+  char* param = (char*)malloc(ssidLen + passLen + 2); // +2 for null terminators
   
+  if (param) {
+    strcpy(param, ssid);
+    strcpy(param + ssidLen + 1, password);
+  }
+  
+  return param;
+}
+
+void handleTestWiFiConnection(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+  // If a test is already in progress, return busy status
+  if (wifiTestInProgress) {
+    request->send(200, "application/json", "{\"status\":\"error\",\"message\":\"Another test is in progress\"}");
+    return;
+  }
+
   DynamicJsonDocument doc(256);
   DeserializationError error = deserializeJson(doc, data, len);
   
   if (error) {
-    debugPrintf("DEBUG: JSON parsing error: %s\n", error.c_str());
     request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"JSON parsing error\"}");
     return;
   }
   
-  const char* ssidValue = doc.containsKey("ssid") ? doc["ssid"].as<const char*>() : "";
-  const char* passwordValue = doc.containsKey("password") ? doc["password"].as<const char*>() : "";
+  // Extract parameters
+  const char* ssid = doc.containsKey("ssid") ? doc["ssid"].as<const char*>() : "";
+  const char* password = doc.containsKey("password") ? doc["password"].as<const char*>() : "";
   
   // Validate SSID
-  if (strlen(ssidValue) == 0 || strlen(ssidValue) > 31) {
-    request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid SSID. Must be between 1 and 31 characters.\"}");
+  if (strlen(ssid) == 0) {
+    request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"SSID is required\"}");
     return;
   }
+
+  // Send immediate response that test has started
+  request->send(200, "application/json", "{\"status\":\"pending\",\"message\":\"WiFi test started\"}");
   
-  debugPrintf("DEBUG: Testing WiFi connection to %s\n", ssidValue);
-  
-  // Remember current settings
-  bool wasEnabled = wifiStationConfig.enabled;
-  char oldSsid[32];
-  char oldPassword[64];
-  strlcpy(oldSsid, wifiStationConfig.ssid, sizeof(oldSsid));
-  strlcpy(oldPassword, wifiStationConfig.password, sizeof(oldPassword));
-  
-  // Create a task to handle the connection test
+  // Create a simple task to test WiFi
   xTaskCreate(
     [](void* parameter) {
-      // Extract parameters
-      struct {
-        AsyncWebServerRequest* request;
-        const char* ssid;
-        const char* password;
-        bool wasEnabled;
-        const char* oldSsid;
-        const char* oldPassword;
-      }* params = (decltype(params))parameter;
+      wifiTestInProgress = true;
       
-      DynamicJsonDocument responseDoc(256);
-      String responseStr;
+      // Copy parameters
+      char ssidCopy[33]; // 32 chars + null terminator
+      char passwordCopy[65]; // 64 chars + null terminator
+      
+      strncpy(ssidCopy, (const char*)parameter, 32);
+      ssidCopy[32] = '\0'; // Ensure null termination
+      
+      // Get password from parameter (it's stored after the SSID)
+      strncpy(passwordCopy, ((const char*)parameter) + strlen(ssidCopy) + 1, 64);
+      passwordCopy[64] = '\0'; // Ensure null termination
+      
+      // Remember current WiFi status
+      bool wasConnected = (WiFi.status() == WL_CONNECTED);
+      char oldSsid[33] = {0};
+      char oldPassword[65] = {0};
+      
+      if (wasConnected) {
+        strncpy(oldSsid, wifiStationConfig.ssid, 32);
+        strncpy(oldPassword, wifiStationConfig.password, 64);
+      }
       
       // Start connection test
+      debugPrintf("DEBUG: Testing WiFi connection to %s\n", ssidCopy);
       WiFi.disconnect();
       WiFi.mode(WIFI_AP_STA);
-      WiFi.begin(params->ssid, params->password);
+      WiFi.begin(ssidCopy, passwordCopy);
       
       // Wait for connection with timeout
       int timeout = 0;
-      while (WiFi.status() != WL_CONNECTED && timeout < 20) {  // 10 second timeout
+      while (WiFi.status() != WL_CONNECTED && timeout < 20) {
         delay(500);
         timeout++;
       }
       
-      // Check result
+      // Log result
       if (WiFi.status() == WL_CONNECTED) {
-        debugPrintln("DEBUG: Test connection successful! IP address: ");
-        debugPrintln(WiFi.localIP().toString().c_str());
-        
-        responseDoc["status"] = "success";
-        responseDoc["message"] = "Connected successfully";
-        responseDoc["ip"] = WiFi.localIP().toString();
-        responseDoc["rssi"] = WiFi.RSSI();
+        debugPrintf("DEBUG: Test connection successful! IP: %s\n", WiFi.localIP().toString().c_str());
       } else {
-        String errorMsg;
-        switch (WiFi.status()) {
-          case WL_NO_SSID_AVAIL:
-            errorMsg = "Network not found";
-            break;
-          case WL_CONNECT_FAILED:
-            errorMsg = "Invalid password";
-            break;
-          case WL_DISCONNECTED:
-            errorMsg = "Connection failed";
-            break;
-          default:
-            errorMsg = "Unknown error";
-            break;
-        }
-        
-        debugPrintf("DEBUG: Test connection failed: %s (status: %d)\n", 
-                  errorMsg.c_str(), WiFi.status());
-        
-        responseDoc["status"] = "error";
-        responseDoc["message"] = errorMsg;
+        debugPrintf("DEBUG: Test connection failed. Status: %d\n", WiFi.status());
       }
       
-      // Send response
-      serializeJson(responseDoc, responseStr);
-      params->request->send(200, "application/json", responseStr);
-      
-      // Restore previous connection if needed
-      if (params->wasEnabled) {
-        WiFi.disconnect();
-        WiFi.begin(params->oldSsid, params->oldPassword);
+      // Restore previous connection
+      WiFi.disconnect();
+      if (wasConnected) {
+        WiFi.begin(oldSsid, oldPassword);
       } else {
-        WiFi.mode(WIFI_AP);  // AP mode only
+        WiFi.mode(WIFI_AP); // AP mode only
       }
       
       // Free parameter memory
-      delete[] params->ssid;
-      delete[] params->password;
-      delete[] params->oldSsid;
-      delete[] params->oldPassword;
-      delete params;
+      free(parameter);
+      wifiTestInProgress = false;
       
       vTaskDelete(NULL);
     },
-    "WiFiTestTask",
+    "WiFiTest",
     4096,
-    new WiFiTestParams {
-      request,
-      strdup(ssidValue),
-      strdup(passwordValue),
-      wasEnabled,
-      strdup(oldSsid),
-      strdup(oldPassword)
-    },
-    1,
+    createWiFiTestParam(ssid, password), // Create a parameter block
+    2,
     NULL
   );
-  
-  // Don't send response here, the task will handle it
 }
 
 // Add these routes to your server setup in initServer() or setup()
@@ -416,6 +402,19 @@ void initWiFiRoutes() {
 }
 
 /*************************************************WIFI ************************************************/
+
+void monitorTask(void *pvParameters) {
+  for(;;) {
+    // Log memory usage
+    debugPrintf("DEBUG: Free heap: %d bytes, Min free heap: %d bytes\n", 
+               ESP.getFreeHeap(), ESP.getMinFreeHeap());
+    
+    // Feed the watchdog
+    esp_task_wdt_reset();
+    
+    vTaskDelay(pdMS_TO_TICKS(5000)); // Check every 5 seconds
+  }
+}
 
 // For MODBUS communications
 #define MODBUS_BUFFER_SIZE 256
@@ -2376,6 +2375,7 @@ bool sendModbusRequest(uint8_t* request, uint8_t requestLength, uint8_t* respons
     disableLoopWDT(); // Disable the main loop watchdog
     disableCore0WDT(); // Disable CPU0 watchdog
     disableCore1WDT(); // Disable CPU1 watchdog
+    esp_task_wdt_init(15, true); // 15 second timeout
 
     debugPrintln("\n\n-------------------------");
     debugPrintln("ES32A08 Setup Utility Starting...");
@@ -2596,6 +2596,17 @@ bool sendModbusRequest(uint8_t* request, uint8_t requestLength, uint8_t* respons
   server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
   debugPrintln("DEBUG: Request body received");
   });
+
+  // Add to setup():
+  xTaskCreatePinnedToCore(
+    monitorTask,
+    "Monitor",
+    2048,
+    NULL,
+    1,
+    NULL,
+    0 // Run on core 0
+  );
 
   // Add watchdog reset task
   xTaskCreate(
