@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ES32A08 Setup Dashboard</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>ES32A08 Setup Dashboard</h1>
+      <nav>
+        <a href="/" class="active">Dashboard</a>
+        <a href="/modbus.html">MODBUS RTU Tester</a>
+      </nav>
+    </header>
+    
+    <main>
+      <section class="card" id="relay-controls">
+        <h2>Relay Outputs</h2>
+        <div class="relay-grid">
+          <!-- Relay toggles will be populated by JavaScript -->
+        </div>
+        <div class="controls">
+          <button id="all-on">All ON</button>
+          <button id="all-off">All OFF</button>
+        </div>
+      </section>
+      
+      <section class="card" id="button-status">
+        <h2>Button States</h2>
+        <div class="button-grid">
+          <!-- Button indicators will be populated by JavaScript -->
+        </div>
+      </section>
+      
+      <section class="card" id="input-status">
+        <h2>Input States (74HC165)</h2>
+        <div class="input-grid">
+          <!-- Input indicators will be populated by JavaScript -->
+        </div>
+      </section>
+      
+      <section class="card" id="analog-inputs">
+        <h2>Analog Inputs</h2>
+        <div class="analog-section">
+          <h3>Voltage Inputs (V)</h3>
+          <div class="analog-grid" id="voltage-inputs">
+            <!-- Voltage input displays will be populated by JavaScript -->
+          </div>
+        </div>
+        
+        <div class="analog-section">
+          <h3>Current Inputs (mA)</h3>
+          <div class="analog-grid" id="current-inputs">
+            <!-- Current input displays will be populated by JavaScript -->
+          </div>
+        </div>
+      </section>
+    </main>
+    
+    <footer>
+      <p>ES32A08 Controller Setup Tool</p>
+    </footer>
+  </div>
+  
+  <script src="js/dashboard.js"></script>
+</body>
+</html>
