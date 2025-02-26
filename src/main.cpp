@@ -403,9 +403,15 @@ void initWiFiRoutes() {
  
 
   server.on("/api/wifi/test", HTTP_POST, 
-    [](AsyncWebServerRequest *request) {},
-    NULL,
-    handleTestWiFiConnection
+    [](AsyncWebServerRequest *request) {
+      // This callback is called after the request is handled
+      // Don't send response here, it's handled in the next callback
+    },
+    NULL,  // Upload handler (not needed for JSON)
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      // This is where you handle the JSON data
+      handleTestWiFiConnection(request, data, len, index, total);
+    }
   );
 }
 
@@ -1651,7 +1657,7 @@ void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t 
   
   debugPrintln("DEBUG: Waiting for time to be set...");
   int retry = 0;
-  const int maxRetries = 10;
+  const int maxRetries = 1;
   struct tm timeinfo;
   
   while(!getLocalTime(&timeinfo) && retry < maxRetries) {
@@ -2366,6 +2372,11 @@ bool sendModbusRequest(uint8_t* request, uint8_t requestLength, uint8_t* respons
     currentUartMode = UART_MODE_DEBUG;
     delay(500); // Give serial time to initialize
     
+    // Disabling Loop Watchdogs
+    disableLoopWDT(); // Disable the main loop watchdog
+    disableCore0WDT(); // Disable CPU0 watchdog
+    disableCore1WDT(); // Disable CPU1 watchdog
+
     debugPrintln("\n\n-------------------------");
     debugPrintln("ES32A08 Setup Utility Starting...");
     debugPrintln("-------------------------");
@@ -2574,9 +2585,36 @@ bool sendModbusRequest(uint8_t* request, uint8_t requestLength, uint8_t* respons
   );
   debugPrintln("DEBUG: Relay update task created");
   
+// Add a not found handler
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    String message = "DEBUG: Not found: " + request->url();
+    debugPrintln(message.c_str());  // Convert String to const char*
+    request->send(404, "text/plain", "Not found");
+  });
+
+  // Set a catch-all handler for any request that doesn't match a route
+  server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+  debugPrintln("DEBUG: Request body received");
+  });
+
+  // Add watchdog reset task
+  xTaskCreate(
+    [](void *parameter) {
+      for(;;) {
+        // Feed the watchdog
+        vTaskDelay(pdMS_TO_TICKS(1000));
+      }
+    },
+    "WatchdogTask",
+    2048,
+    NULL,
+    1,
+    NULL
+  );
+
   // When starting the server, add debug information
   debugPrintln("DEBUG: Starting web server...");
-  server.begin();server.begin();
+  server.begin();
   debugPrintln("DEBUG: Web server started");
   
   // Create task to update analog values
