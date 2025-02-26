@@ -1063,7 +1063,7 @@ void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t 
   // Send success response before starting watering
   // (because watering will block)
   request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Manual watering started\"}");
-  
+
   // Execute watering in a new task to avoid blocking the web server
   xTaskCreate(
     [](void* parameter) {
@@ -1078,6 +1078,7 @@ void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t 
     1,
     NULL
   );
+}
 
   // Initialize time for the scheduler
   void initSchedulerTime() {
