@@ -27,6 +27,13 @@ bool inputStates[8] = {false, false, false, false, false, false, false, false};
 // You will need this mutex at the top of your main.cpp file with other global variables:
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
+// Helper structure for manual watering task parameters
+struct ManualWateringParams {
+  int relay;
+  int duration;
+};
+
+
 // For MODBUS communications
 #define MODBUS_BUFFER_SIZE 256
 uint8_t modbusRequestBuffer[MODBUS_BUFFER_SIZE];
@@ -63,6 +70,8 @@ void switchToDebugMode() {
 // First, make sure the debug functions are declared
 extern void debugPrintln(const char* message);
 extern void debugPrintf(const char* format, ...);
+
+void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
 
 // This task will continuously update the relay outputs
 void vRelayUpdateTask(void *pvParameters) {
@@ -843,7 +852,6 @@ void loadSchedulerState() {
   portEXIT_CRITICAL(&schedulerMutex);
   saveSchedulerState();
   
-  request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler state saved\"}");
 }
 
 // Handler for loading scheduler state
@@ -1070,10 +1078,9 @@ void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t 
     1,
     NULL
   );
-}
 
-// Initialize time for the scheduler
-void initSchedulerTime() {
+  // Initialize time for the scheduler
+  void initSchedulerTime() {
   debugPrintln("DEBUG: Initializing time for scheduler...");
   
   // Configure time zone and NTP servers
@@ -1147,12 +1154,6 @@ void initScheduler() {
   
   debugPrintln("DEBUG: Scheduler initialized");
 }
-
-// Helper structure for manual watering task parameters
-struct ManualWateringParams {
-  int relay;
-  int duration;
-};
 
 // CRC16 calculation for MODBUS
 uint16_t calculateCRC16(uint8_t* buffer, uint8_t length) {
