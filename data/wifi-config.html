@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ES32A08 WiFi Configuration</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>ES32A08 WiFi Configuration</h1>
+      <nav>
+        <a href="/">Dashboard</a>
+        <a href="/modbus.html">MODBUS RTU Tester</a>
+        <a href="/scheduler.html">Irrigation Scheduler</a>
+        <a href="/wifi.html" class="active">WiFi Config</a>
+      </nav>
+    </header>
+    
+    <main>
+      <section class="card" id="wifi-settings">
+        <h2>WiFi Station Mode Configuration</h2>
+        <p>
+          Configure the device to connect to your WiFi network. This allows the device to access the internet for NTP time synchronization.
+          The device will maintain its AP mode (ES32A08-Setup) even when connected to your WiFi network.
+        </p>
+        
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="wifi-enabled">Enable WiFi Station Mode</label>
+            <div class="toggle-switch">
+              <input type="checkbox" id="wifi-enabled">
+              <label for="wifi-enabled" class="toggle-label"></label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="wifi-ssid">WiFi Network Name (SSID)</label>
+            <input type="text" id="wifi-ssid" placeholder="Enter your WiFi network name">
+          </div>
+          
+          <div class="form-group">
+            <label for="wifi-password">WiFi Password</label>
+            <input type="password" id="wifi-password" placeholder="Enter your WiFi password">
+            <button id="show-password" class="icon-button">👁️</button>
+          </div>
+        </div>
+        
+        <div class="controls">
+          <button id="save-wifi-config" class="btn-primary">Save WiFi Configuration</button>
+          <button id="test-connection" class="btn-secondary">Test Connection</button>
+        </div>
+        
+        <div id="status-message" class="status-message" style="display: none;"></div>
+      </section>
+      
+      <section class="card" id="wifi-status">
+        <h2>WiFi Status</h2>
+        
+        <div class="status-display">
+          <div class="status-item">
+            <div class="status-label">AP Mode:</div>
+            <div class="status-value">
+              <span id="ap-status" class="status-on">Active</span>
+              (SSID: ES32A08-Setup)
+            </div>
+          </div>
+          
+          <div class="status-item">
+            <div class="status-label">Station Mode:</div>
+            <div class="status-value" id="sta-status">Not Connected</div>
+          </div>
+          
+          <div class="status-item">
+            <div class="status-label">IP Address (AP):</div>
+            <div class="status-value" id="ap-ip">192.168.4.1</div>
+          </div>
+          
+          <div class="status-item">
+            <div class="status-label">IP Address (Station):</div>
+            <div class="status-value" id="sta-ip">N/A</div>
+          </div>
+          
+          <div class="status-item">
+            <div class="status-label">Time Sync Status:</div>
+            <div class="status-value" id="time-sync-status">Not Synchronized</div>
+          </div>
+        </div>
+      </section>
+    </main>
+    
+    <footer>
+      <p>ES32A08 Controller Setup Tool</p>
+    </footer>
+  </div>
+  
+  <script src="js/wifi.js"></script>
+</body>
+</html>
