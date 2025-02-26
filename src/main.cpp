@@ -23,6 +23,8 @@ float voltageValues[4] = {0.0, 0.0, 0.0, 0.0};
 float currentValues[4] = {0.0, 0.0, 0.0, 0.0};
 bool buttonStates[4] = {false, false, false, false};
 bool inputStates[8] = {false, false, false, false, false, false, false, false};
+// You will need this mutex at the top of your main.cpp file with other global variables:
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 // For MODBUS communications
 #define MODBUS_BUFFER_SIZE 256
@@ -55,6 +57,64 @@ void switchToDebugMode() {
   
   currentUartMode = UART_MODE_DEBUG;
   delay(10);  // Small delay for UART to stabilize
+}
+
+// First, make sure the debug functions are declared
+extern void debugPrintln(const char* message);
+extern void debugPrintf(const char* format, ...);
+
+// This task will continuously update the relay outputs
+void vRelayUpdateTask(void *pvParameters) {
+  debugPrintln("DEBUG: Relay update task started");
+  
+  // Local variables for shift register control
+  static const uint8_t ALL_OFF = 0x00;
+  
+  // Local variable to track relay state changes for debugging
+  uint8_t lastRelayState = 0xFF; // Initialize to a different value to force first update
+  
+  for (;;) {
+    // Check if relay state has changed
+    if (relayState != lastRelayState) {
+      lastRelayState = relayState;
+      debugPrintf("DEBUG: Relay state changed to 0x%02X\n", relayState);
+    }
+    
+    // Send the current relay state to the shift register
+    // We need to disable interrupts briefly to ensure the shift register operations aren't interrupted
+    portENTER_CRITICAL(&mux);
+    
+    // Send relay state byte directly
+    digitalWrite(SH595_LATCH, LOW);
+    
+    // Send relay state as first byte
+    for (uint8_t i = 0; i < 8; i++) {
+      digitalWrite(SH595_DATA, (relayState & (0x80 >> i)) ? HIGH : LOW);
+      digitalWrite(SH595_CLOCK, LOW);
+      digitalWrite(SH595_CLOCK, HIGH);
+    }
+    
+    // Send zero for other bytes (display control) to avoid interference
+    for (uint8_t i = 0; i < 16; i++) { // 16 more bits (2 bytes) for display control
+      digitalWrite(SH595_DATA, LOW);
+      digitalWrite(SH595_CLOCK, LOW);
+      digitalWrite(SH595_CLOCK, HIGH);
+    }
+    
+    digitalWrite(SH595_LATCH, HIGH);
+    
+    portEXIT_CRITICAL(&mux);
+    
+    // Brief debug message every 10 seconds for monitoring
+    static uint32_t lastDebugTime = 0;
+    if (millis() - lastDebugTime > 10000) {
+      lastDebugTime = millis();
+      debugPrintf("DEBUG: Relay update task running, current state: 0x%02X\n", relayState);
+    }
+    
+    // Update at a reasonable rate
+    vTaskDelay(pdMS_TO_TICKS(50)); // 50ms delay (20Hz update rate)
+  }
 }
 
 void switchToRS485Mode() {
@@ -350,7 +410,14 @@ void vAnalogTask(void *pvParameters) {
 void handleGetIOStatus(AsyncWebServerRequest *request) {
   debugPrintln("DEBUG: API request received: /api/io/status");
   
-  DynamicJsonDocument doc(1024);
+  // Debug print analog values before creating response
+  debugPrintln("DEBUG: Analog values being sent:");
+  for (int i = 0; i < 4; i++) {
+    debugPrintf("DEBUG: V%d=%.2fV, I%d=%.2fmA\n", 
+              i+1, voltageValues[i], i+1, currentValues[i]);
+  }
+  
+  DynamicJsonDocument doc(2048); // Increased size to ensure enough space
   
   // Add relay states
   JsonArray relays = doc.createNestedArray("relays");
@@ -376,32 +443,71 @@ void handleGetIOStatus(AsyncWebServerRequest *request) {
     input["state"] = inputStates[i];
   }
   
-  // Add analog inputs
-  JsonArray voltageInputs = doc.createNestedArray("voltageInputs");
+  // Add voltage inputs - FIX: explicitly create array first, then add objects
+  JsonArray voltageInputsArray = doc.createNestedArray("voltageInputs");
   for (int i = 0; i < 4; i++) {
-    JsonObject input = voltageInputs.createNestedObject();
+    JsonObject input = voltageInputsArray.createNestedObject();
     input["id"] = i;
     input["value"] = voltageValues[i];
   }
   
-  JsonArray currentInputs = doc.createNestedArray("currentInputs");
+  // Add current inputs - FIX: explicitly create array first, then add objects
+  JsonArray currentInputsArray = doc.createNestedArray("currentInputs");
   for (int i = 0; i < 4; i++) {
-    JsonObject input = currentInputs.createNestedObject();
+    JsonObject input = currentInputsArray.createNestedObject();
     input["id"] = i;
     input["value"] = currentValues[i];
   }
   
+  // Debug print the final JSON size
+  debugPrintf("DEBUG: JSON document size: %d bytes\n", doc.memoryUsage());
+  
   String response;
   serializeJson(doc, response);
   
-  request->send(200, "application/json", response);
+  // Debug print a sample of the response - FIX: use c_str() for String conversion
+  debugPrint("DEBUG: JSON response sample: ");
+  if (response.length() > 100) {
+    String sample = response.substring(0, 100) + "...";
+    debugPrintln(sample.c_str());
+  } else {
+    debugPrintln(response.c_str());
+  }
   
+  request->send(200, "application/json", response);
   debugPrintln("DEBUG: IO status sent to client");
 }
 
 // Handler for setting relay states
 void handleSetRelay(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
   debugPrintln("DEBUG: API request received: /api/io/relay");
+  
+  // Detailed debug of received data
+  debugPrintf("DEBUG: Received %d bytes of data\n", len);
+  
+  // Check if we received any data
+  if (len == 0) {
+    debugPrintln("DEBUG: No data received");
+    request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No data received\"}");
+    return;
+  }
+  
+  // For debugging - print raw data
+  debugPrint("DEBUG: Raw request data: ");
+  for (size_t i = 0; i < min(len, size_t(20)); i++) {
+    debugPrintf("%02X ", data[i]);
+  }
+  if (len > 20) {
+    debugPrint("...");
+  }
+  debugPrintln("");
+  
+  // For debugging - try to print as string
+  String dataStr = "";
+  for (size_t i = 0; i < min(len, size_t(100)); i++) {
+    dataStr += (char)data[i];
+  }
+  debugPrintf("DEBUG: Request data as string: %s\n", dataStr.c_str());
   
   DynamicJsonDocument doc(256);
   DeserializationError error = deserializeJson(doc, data, len);
@@ -412,6 +518,11 @@ void handleSetRelay(AsyncWebServerRequest *request, uint8_t *data, size_t len, s
     return;
   }
   
+  // Detailed debug of parsed JSON
+  String jsonDump;
+  serializeJson(doc, jsonDump);
+  debugPrintf("DEBUG: Parsed JSON: %s\n", jsonDump.c_str());
+  
   if (doc.containsKey("relay") && doc.containsKey("state")) {
     int relay = doc["relay"].as<int>();
     bool state = doc["state"].as<bool>();
@@ -419,20 +530,35 @@ void handleSetRelay(AsyncWebServerRequest *request, uint8_t *data, size_t len, s
     debugPrintf("DEBUG: Setting relay %d to %s\n", relay, state ? "ON" : "OFF");
     
     if (relay >= 0 && relay < 8) {
+      uint8_t oldState = relayState;
+      
       if (state) {
         relayState |= (1 << relay);
       } else {
         relayState &= ~(1 << relay);
       }
       
-      debugPrintf("DEBUG: New relay state: 0x%02X\n", relayState);
-      request->send(200, "application/json", "{\"status\":\"success\"}");
+      debugPrintf("DEBUG: Relay state changed: 0x%02X -> 0x%02X\n", oldState, relayState);
+      
+      // Create a more helpful response
+      String responseJson = "{\"status\":\"success\",\"relay\":" + String(relay) + 
+                           ",\"state\":" + (state ? "true" : "false") + 
+                           ",\"relayState\":\"0x" + String(relayState, HEX) + "\"}";
+      
+      request->send(200, "application/json", responseJson);
       return;
     } else {
       debugPrintln("DEBUG: Invalid relay ID");
     }
   } else {
     debugPrintln("DEBUG: Missing relay ID or state");
+    // Check what keys are actually present
+    String keys = "Keys present:";
+    for (JsonPair kv : doc.as<JsonObject>()) {
+      keys += " ";
+      keys += kv.key().c_str();
+    }
+    debugPrintln(keys.c_str());
   }
   
   request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid relay ID or state\"}");
@@ -473,6 +599,45 @@ void handleSetAllRelays(AsyncWebServerRequest *request, uint8_t *data, size_t le
   }
   
   request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid relay states\"}");
+}
+
+// This task will cycle through all relays for testing
+void vRelayTestTask(void *pvParameters) {
+  debugPrintln("DEBUG: Relay test task started");
+  
+  // First turn all relays off
+  relayState = 0x00;
+  vTaskDelay(pdMS_TO_TICKS(500));
+  
+  // Turn each relay on and off in sequence
+  for (int i = 0; i < 8; i++) {
+    debugPrintf("DEBUG: Testing relay %d - ON\n", i + 1);
+    
+    // Turn on this relay
+    relayState = (1 << i);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    debugPrintf("DEBUG: Testing relay %d - OFF\n", i + 1);
+    
+    // Turn off this relay
+    relayState = 0x00;
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
+  
+  // Turn all relays on
+  debugPrintln("DEBUG: All relays ON");
+  relayState = 0xFF;
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  
+  // Turn all relays off
+  debugPrintln("DEBUG: All relays OFF");
+  relayState = 0x00;
+  vTaskDelay(pdMS_TO_TICKS(500));
+  
+  debugPrintln("DEBUG: Relay test completed");
+  
+  // Delete this task when finished
+  vTaskDelete(NULL);
 }
 
 // Handler for MODBUS requests
@@ -728,7 +893,7 @@ void setup() {
   // Initialize the shift register (74HC595) with timeout
   debugPrintln("DEBUG: Starting 74HC595 initialization with timeout...");
   initTestModeComplete = false;
-  xTaskCreate(initTestModeTask, "InitTask", 4096, NULL, 1, NULL);
+  xTaskCreatePinnedToCore(initTestModeTask, "InitTask", 4096, NULL, 1, NULL,1);
   
   // Wait for initialization or timeout
   unsigned long startTime = millis();
@@ -761,6 +926,50 @@ void setup() {
   switchToDebugMode();
   debugPrintln("DEBUG: RS485 test completed");
   
+  // Add this initialization to your setup() function in main.cpp,
+  // right after initializing other pins and before starting the web server
+
+  // Initialize analog values to zero
+  for (int i = 0; i < 4; i++) {
+    voltageValues[i] = 0.0;
+    currentValues[i] = 0.0;
+  }
+
+  debugPrintln("DEBUG: Initialized analog value arrays");
+
+  // Perform a first reading of analog values
+  int analog_value[8] = {0};
+  try {
+    analog_value[0] = analogRead(AI_V1);
+    analog_value[1] = analogRead(AI_V2);
+    analog_value[2] = analogRead(AI_V3);
+    analog_value[3] = analogRead(AI_V4);
+    analog_value[4] = analogRead(AI_I1);
+    analog_value[5] = analogRead(AI_I2);
+    analog_value[6] = analogRead(AI_I3);
+    analog_value[7] = analogRead(AI_I4);
+    
+    // Convert to voltage
+    voltageValues[0] = (float)analog_value[0] * 3300 / 4096 / 1000 * 53 / 10 + 0.6;
+    voltageValues[1] = (float)analog_value[1] * 3300 / 4096 / 1000 * 53 / 10 + 0.6;
+    voltageValues[2] = (float)analog_value[2] * 3300 / 4096 / 1000 * 53 / 10 + 0.6;
+    voltageValues[3] = (float)analog_value[3] * 3300 / 4096 / 1000 * 53 / 10 + 0.6;
+    
+    // Convert to current
+    currentValues[0] = ((float)analog_value[4] * 3300 / 4096 / 1000 + 0.12) / 91 * 1000;
+    currentValues[1] = ((float)analog_value[5] * 3300 / 4096 / 1000 + 0.12) / 91 * 1000;
+    currentValues[2] = ((float)analog_value[6] * 3300 / 4096 / 1000 + 0.12) / 91 * 1000;
+    currentValues[3] = ((float)analog_value[7] * 3300 / 4096 / 1000 + 0.12) / 91 * 1000;
+  } catch (...) {
+    debugPrintln("DEBUG: Error during initial analog read");
+  }
+
+  debugPrintln("DEBUG: Initial analog values:");
+  for (int i = 0; i < 4; i++) {
+    debugPrintf("DEBUG: V%d=%.2fV, I%d=%.2fmA\n", 
+              i+1, voltageValues[i], i+1, currentValues[i]);
+  }
+
   // Set up Access Point
   debugPrintln("DEBUG: Setting up WiFi Access Point...");
   WiFi.softAP(ssid, password);
@@ -819,14 +1028,27 @@ void setup() {
     handleModbusRequest
   );
   
-  // Start server
+  // Create task to handle relay outputs continuously
+  debugPrintln("DEBUG: Creating relay update task...");
+  xTaskCreatePinnedToCore(
+    vRelayUpdateTask,    // Function that implements the task
+    "RelayTask",         // Text name for the task
+    2048,                // Stack size in bytes
+    NULL,                // Parameter passed into the task
+    1,                   // Priority of the task
+    NULL,                // Task handle
+    1                    //Pinned to Core 1
+  );
+  debugPrintln("DEBUG: Relay update task created");
+  
+  // When starting the server, add debug information
   debugPrintln("DEBUG: Starting web server...");
-  server.begin();
+  server.begin();server.begin();
   debugPrintln("DEBUG: Web server started");
   
   // Create task to update analog values
   debugPrintln("DEBUG: Creating analog update task...");
-  xTaskCreate(vAnalogTask, "AnalogTask", 4096, NULL, 1, NULL);
+  xTaskCreatePinnedToCore(vAnalogTask, "AnalogTask", 4096, NULL, 1, NULL,1);
   
   debugPrintln("DEBUG: Setup complete!");
   debugPrintln("-------------------------");

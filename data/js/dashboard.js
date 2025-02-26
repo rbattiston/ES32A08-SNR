@@ -97,6 +97,12 @@ async function fetchIOStatus() {
     }
     
     const data = await response.json();
+    
+    // Debug - log received data
+    console.log("IO Status received:", data);
+    console.log("Voltage inputs:", data.voltageInputs);
+    console.log("Current inputs:", data.currentInputs);
+    
     updateUIState(data);
   } catch (error) {
     console.error('Error fetching IO status:', error);
@@ -109,62 +115,84 @@ function updateUIState(data) {
   ioState = data;
   
   // Update relay toggles
-  ioState.relays.forEach(relay => {
-    const toggle = document.querySelector(`.relay-toggle[data-relay="${relay.id}"]`);
-    if (toggle) {
-      toggle.checked = relay.state;
-    }
-  });
+  if (ioState.relays && ioState.relays.length > 0) {
+    ioState.relays.forEach(relay => {
+      const toggle = document.querySelector(`.relay-toggle[data-relay="${relay.id}"]`);
+      if (toggle) {
+        toggle.checked = relay.state;
+      }
+    });
+  }
   
   // Update button indicators
-  ioState.buttons.forEach(button => {
-    const indicator = document.getElementById(`button-${button.id}`);
-    const value = document.getElementById(`button-value-${button.id}`);
-    
-    if (indicator && value) {
-      if (button.state) {
-        indicator.className = 'status-indicator status-on';
-        value.textContent = 'ON';
-      } else {
-        indicator.className = 'status-indicator status-off';
-        value.textContent = 'OFF';
+  if (ioState.buttons && ioState.buttons.length > 0) {
+    ioState.buttons.forEach(button => {
+      const indicator = document.getElementById(`button-${button.id}`);
+      const value = document.getElementById(`button-value-${button.id}`);
+      
+      if (indicator && value) {
+        if (button.state) {
+          indicator.className = 'status-indicator status-on';
+          value.textContent = 'ON';
+        } else {
+          indicator.className = 'status-indicator status-off';
+          value.textContent = 'OFF';
+        }
       }
-    }
-  });
+    });
+  }
   
   // Update input indicators
-  ioState.inputs.forEach(input => {
-    const indicator = document.getElementById(`input-${input.id}`);
-    const value = document.getElementById(`input-value-${input.id}`);
-    
-    if (indicator && value) {
-      if (input.state) {
-        indicator.className = 'status-indicator status-on';
-        value.textContent = 'ON';
-      } else {
-        indicator.className = 'status-indicator status-off';
-        value.textContent = 'OFF';
+  if (ioState.inputs && ioState.inputs.length > 0) {
+    ioState.inputs.forEach(input => {
+      const indicator = document.getElementById(`input-${input.id}`);
+      const value = document.getElementById(`input-value-${input.id}`);
+      
+      if (indicator && value) {
+        if (input.state) {
+          indicator.className = 'status-indicator status-on';
+          value.textContent = 'ON';
+        } else {
+          indicator.className = 'status-indicator status-off';
+          value.textContent = 'OFF';
+        }
       }
-    }
-  });
+    });
+  }
   
   // Update voltage inputs
-  ioState.voltageInputs.forEach(input => {
-    const value = document.getElementById(`voltage-value-${input.id}`);
-    
-    if (value) {
-      value.textContent = `${input.value.toFixed(2)} V`;
-    }
-  });
+  if (ioState.voltageInputs && ioState.voltageInputs.length > 0) {
+    console.log("Updating voltage inputs display");
+    ioState.voltageInputs.forEach(input => {
+      const value = document.getElementById(`voltage-value-${input.id}`);
+      
+      if (value) {
+        console.log(`Setting voltage-value-${input.id} to ${input.value.toFixed(2)} V`);
+        value.textContent = `${input.value.toFixed(2)} V`;
+      } else {
+        console.warn(`Element voltage-value-${input.id} not found`);
+      }
+    });
+  } else {
+    console.warn("No voltage inputs data available");
+  }
   
   // Update current inputs
-  ioState.currentInputs.forEach(input => {
-    const value = document.getElementById(`current-value-${input.id}`);
-    
-    if (value) {
-      value.textContent = `${input.value.toFixed(2)} mA`;
-    }
-  });
+  if (ioState.currentInputs && ioState.currentInputs.length > 0) {
+    console.log("Updating current inputs display");
+    ioState.currentInputs.forEach(input => {
+      const value = document.getElementById(`current-value-${input.id}`);
+      
+      if (value) {
+        console.log(`Setting current-value-${input.id} to ${input.value.toFixed(2)} mA`);
+        value.textContent = `${input.value.toFixed(2)} mA`;
+      } else {
+        console.warn(`Element current-value-${input.id} not found`);
+      }
+    });
+  } else {
+    console.warn("No current inputs data available");
+  }
 }
 
 // Set a single relay state
@@ -239,6 +267,7 @@ function addEventListeners() {
 
 // Initialize the dashboard
 function initDashboard() {
+  console.log("Initializing dashboard...");
   createUIElements();
   addEventListeners();
   fetchIOStatus();
