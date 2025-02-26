@@ -1,0 +1,216 @@
+{
+    "devices": [
+      {
+        "deviceName": "S-CO2-03 CO₂, Temperature and Humidity Sensor",
+        "manufacturer": "Seeed Technology Co., Ltd.",
+        "model": "S-CO2-03A / S-CO2-03B",
+        "defaultModbusAddress": 45,
+        "supportedProtocols": ["Modbus RTU", "Modbus ASCII", "SDI-12"],
+        "registers": [
+          {
+            "name": "CO₂ Concentration",
+            "address": "0x0000",
+            "dataType": "uint16",
+            "access": "read-only",
+            "unit": "ppm",
+            "description": "Measured carbon dioxide concentration (0–10000 ppm)"
+          },
+          {
+            "name": "Air Temperature",
+            "address": "0x0001",
+            "dataType": "int16",
+            "access": "read-only",
+            "unit": "°C",
+            "description": "Measured air temperature in hundredths (e.g. 2500 = 25.00°C)"
+          },
+          {
+            "name": "Air Humidity",
+            "address": "0x0002",
+            "dataType": "uint16",
+            "access": "read-only",
+            "unit": "%RH",
+            "description": "Measured relative humidity in hundredths (e.g. 5000 = 50.00%RH)"
+          },
+          {
+            "name": "Version",
+            "address": "0x0007",
+            "dataType": "uint16",
+            "access": "read-only",
+            "description": "Combined version info; high byte is hardware version, low byte is software version"
+          },
+          {
+            "name": "Modbus Slave Address",
+            "address": "0x0010",
+            "dataType": "uint16",
+            "access": "read/write",
+            "range": "1–247",
+            "default": 45,
+            "description": "Sensor Modbus address. Power cycle required for changes."
+          },
+          {
+            "name": "Serial Baud Rate",
+            "address": "0x0011",
+            "dataType": "uint16",
+            "access": "read/write",
+            "range": {
+              "0": "1200bps",
+              "1": "2400bps",
+              "2": "4800bps",
+              "3": "9600bps",
+              "4": "19200bps",
+              "5": "38400bps",
+              "6": "57600bps",
+              "7": "115200bps"
+            },
+            "default": 3,
+            "description": "Baud rate setting. Power cycle required for changes."
+          },
+          {
+            "name": "Serial Communication Parity",
+            "address": "0x0012",
+            "dataType": "uint16",
+            "access": "read/write",
+            "range": {
+              "0": "None",
+              "1": "Odd",
+              "2": "Even"
+            },
+            "default": 0,
+            "description": "Parity setting. Power cycle required for changes."
+          },
+          {
+            "name": "Serial Communication Stop Bit",
+            "address": "0x0013",
+            "dataType": "uint16",
+            "access": "read/write",
+            "range": {
+              "0": "1 stop bit",
+              "1": "2 stop bits"
+            },
+            "default": 0,
+            "description": "Stop bit configuration. Power cycle required for changes."
+          },
+          {
+            "name": "Modbus Protocol Type",
+            "address": "0x0014",
+            "dataType": "uint16",
+            "access": "read/write",
+            "range": {
+              "0": "Modbus RTU",
+              "1": "Modbus ASCII"
+            },
+            "default": 0,
+            "description": "Protocol type selection. Power cycle required for changes."
+          },
+          {
+            "name": "SDI-12 Address",
+            "address": "0x0015",
+            "dataType": "uint16",
+            "access": "read-only",
+            "default": "0x30",
+            "description": "SDI-12 address (default ASCII code for '0')"
+          },
+          {
+            "name": "Delayed Response",
+            "address": "0x0020",
+            "dataType": "uint16",
+            "access": "read/write",
+            "range": "0–65535 ms",
+            "default": 10,
+            "description": "Delay (in ms) before sensor sends a response"
+          },
+          {
+            "name": "CO₂ Sensor Warm-Up Time",
+            "address": "0x0021",
+            "dataType": "uint16",
+            "access": "read/write",
+            "range": "0–65535 seconds",
+            "default": 120,
+            "description": "Sensor warm-up time in seconds before valid readings are available"
+          }
+        ],
+        "modbusOperations": [
+          { "functionCode": "03", "operation": "Read Holding Registers" },
+          { "functionCode": "06", "operation": "Write Single Register" },
+          { "functionCode": "10", "operation": "Write Multiple Registers" }
+        ]
+      },
+      {
+        "deviceName": "ES32A08 ESP32 8 CH Analog Relay Expansion Board",
+        "manufacturer": "天拓电子科技 / Eletechsup",
+        "model": "ES32A08",
+        "defaultModbusAddress": null,
+        "supportedProtocols": ["RS485"],
+        "notes": "This expansion board is designed to work with a 38PIN ESP32 board. It provides 8 relay outputs, 8 opto-isolated inputs, 4 current inputs, 4 voltage inputs, and a digital tube display. The manual does not specify a default Modbus register map; custom firmware and register definitions are required for Modbus RTU control.",
+        "registers": [],
+        "modbusOperations": []
+      },
+      {
+        "deviceName": "Waveshare Modbus RTU 8-Channel Relay Module",
+        "manufacturer": "Waveshare",
+        "model": "Modbus RTU Relay",
+        "defaultModbusAddress": 1,
+        "supportedProtocols": ["Modbus RTU"],
+        "registers": [
+          {
+            "name": "Relay Control (Channel 1–8)",
+            "addressRange": "0x0000–0x0007",
+            "dataType": "uint16",
+            "access": "read/write",
+            "description": "Controls individual relay channels. Use 0xFF00 for ON, 0x0000 for OFF, 0x5500 for toggle."
+          },
+          {
+            "name": "All Relays Control",
+            "address": "0x00FF",
+            "dataType": "uint16",
+            "access": "write",
+            "description": "Controls all relays simultaneously. Use 0xFF00 for all ON, 0x0000 for all OFF, 0x5500 for all toggle."
+          },
+          {
+            "name": "Relay Toggle (Channel 1–8)",
+            "addressRange": "0x0100–0x0107",
+            "dataType": "uint16",
+            "access": "write",
+            "description": "Triggers relay toggle for each channel. 0xFF00 toggles; 0x0000 leaves unchanged."
+          },
+          {
+            "name": "Relay Flash (Channel 1–8)",
+            "addressRange": "0x0200–0x0207",
+            "dataType": "uint16",
+            "access": "write",
+            "description": "Initiates flash (pulse) action for relays with delay (data × 100 ms)."
+          },
+          {
+            "name": "Serial Port Parameters",
+            "address": "0x2000",
+            "dataType": "uint16",
+            "access": "read/write",
+            "description": "High byte: checksum method (0–2); low byte: baud rate value (0–7)."
+          },
+          {
+            "name": "Device Address",
+            "address": "0x4000",
+            "dataType": "uint16",
+            "access": "read/write",
+            "description": "Sets or reads the Modbus device address (0x0001–0x00FF)."
+          },
+          {
+            "name": "Software Version",
+            "address": "0x8000",
+            "dataType": "uint16",
+            "access": "read",
+            "description": "Returns the software version (e.g., 0x012C indicates V3.00)."
+          }
+        ],
+        "modbusOperations": [
+          { "functionCode": "01", "operation": "Read Coil Status" },
+          { "functionCode": "03", "operation": "Read Holding Registers" },
+          { "functionCode": "05", "operation": "Write Single Coil" },
+          { "functionCode": "06", "operation": "Write Single Register" },
+          { "functionCode": "0F", "operation": "Write Multiple Coils" }
+        ],
+        "notes": "This relay module supports individual relay control, group operations, flashing commands, and configuration of serial parameters and device address. Refer to the Waveshare Wiki for detailed command examples and operating instructions."
+      }
+    ]
+  }
+  

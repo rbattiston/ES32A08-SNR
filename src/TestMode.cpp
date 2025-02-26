@@ -2,6 +2,17 @@
 #include "TestMode.h"
 #include "PinConfig.h"
 
+// Enable debug prints by defining DEBUG.
+// #define DEBUG
+
+#ifdef DEBUG
+  #define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
+  #define DEBUG_PRINTLN(...) Serial.println(__VA_ARGS__)
+#else
+  #define DEBUG_PRINT(...)
+  #define DEBUG_PRINTLN(...)
+#endif
+
 // If not defined in PinConfig.h, define analog input pins:
 #ifndef Vi1
   #define Vi1   32
@@ -58,7 +69,12 @@ volatile uint8_t relayState = 0;  // Updated by the relay task
 //---------------------------------------------------------------------
 // Shift Register Functions for 74HC595 (common to display & relay)
 //---------------------------------------------------------------------
+// Sends one byte out to the 74HC595.
+// A debug print shows the value being sent.
 void Send_Bytes(uint8_t value) {
+  DEBUG_PRINT("Send_Bytes: Sending byte 0x");
+  if (value < 0x10) DEBUG_PRINT("0");
+  DEBUG_PRINTLN(value, HEX);
   for (uint8_t i = 0; i < 8; i++) {
     digitalWrite(SH595_DATA, (value & 0x80) ? HIGH : LOW);
     value <<= 1;
@@ -67,16 +83,28 @@ void Send_Bytes(uint8_t value) {
   }
 }
 
-// Combined function: sends three bytes to the 74HC595: the relay state,
-// the digit select byte, and the segment data byte.
+// Combined function: sends three bytes to the 74HC595:
+// the relay state, the digit select byte, and the segment data byte.
 void Send_74HC595(uint8_t relayOut) {
   uint8_t tube_dat = TUBE_SEG[dat];
   uint8_t bit_num  = TUBE_NUM[com_num];
+  DEBUG_PRINT("Send_74HC595: relayOut = 0x");
+  if (relayOut < 0x10) DEBUG_PRINT("0");
+  DEBUG_PRINT(relayOut, HEX);
+  DEBUG_PRINT(", bit_num = 0x");
+  if (bit_num < 0x10) DEBUG_PRINT("0");
+  DEBUG_PRINT(bit_num, HEX);
+  DEBUG_PRINT(", tube_dat = 0x");
+  if (tube_dat < 0x10) DEBUG_PRINT("0");
+  DEBUG_PRINTLN(tube_dat, HEX);
+  
   Send_Bytes(relayOut);  // Send relay state byte
   Send_Bytes(bit_num);   // Send digit select byte
   Send_Bytes(tube_dat);  // Send segment data byte
+  
   digitalWrite(SH595_LATCH, LOW);
   digitalWrite(SH595_LATCH, HIGH);
+  DEBUG_PRINTLN("Send_74HC595: Latch toggled to update outputs.");
 }
 
 //---------------------------------------------------------------------
@@ -90,6 +118,16 @@ void TubeDisplayCounter(unsigned int cnt) {
   digit[2] = (cnt / 10) % 10;
   digit[3] = cnt % 10;
   
+  DEBUG_PRINT("TubeDisplayCounter: Displaying counter ");
+  DEBUG_PRINTLN(cnt);
+  DEBUG_PRINT("Digits: ");
+  for (uint8_t i = 0; i < 4; i++) {
+    DEBUG_PRINT(digit[i]);
+    DEBUG_PRINT(" ");
+  }
+  DEBUG_PRINTLN("");
+
+  // com_num runs from 0 to 7; each pair of iterations uses the same digit.
   for (com_num = 0; com_num < 8; com_num++) {
     dat = digit[com_num / 2];  // Maps: 0,0,1,1,2,2,3,3
     Send_74HC595(relayState);  // Output current relayState as first byte
@@ -103,6 +141,8 @@ void testLoop() {
   if (now - lastCounterUpdate >= 1000) {
     lastCounterUpdate = now;
     counter = (counter + 1) % 10000;
+    DEBUG_PRINT("testLoop: Counter updated to ");
+    DEBUG_PRINTLN(counter);
   }
   TubeDisplayCounter(counter);
 }
@@ -113,6 +153,7 @@ void initTestMode() {
   pinMode(SH595_CLOCK, OUTPUT);
   pinMode(SH595_LATCH, OUTPUT);
   pinMode(SH595_OE, OUTPUT);
+  DEBUG_PRINTLN("initTestMode: Initializing shift register pins.");
   // Clear display
   Send_74HC595(0);
   digitalWrite(SH595_OE, LOW);  // Enable outputs (active LOW)
@@ -144,18 +185,22 @@ void updateRelayState() {
   if (key1 && (!lastKey1) && (now - lastToggleTime1 >= debounceDelay)) {
     relayState ^= 0x01;
     lastToggleTime1 = now;
+    DEBUG_PRINTLN("updateRelayState: KEY1 pressed. Toggling relayState bit 0.");
   }
   if (key2 && (!lastKey2) && (now - lastToggleTime2 >= debounceDelay)) {
     relayState ^= 0x02;
     lastToggleTime2 = now;
+    DEBUG_PRINTLN("updateRelayState: KEY2 pressed. Toggling relayState bit 1.");
   }
   if (key3 && (!lastKey3) && (now - lastToggleTime3 >= debounceDelay)) {
     relayState ^= 0x04;
     lastToggleTime3 = now;
+    DEBUG_PRINTLN("updateRelayState: KEY3 pressed. Toggling relayState bit 2.");
   }
   if (key4 && (!lastKey4) && (now - lastToggleTime4 >= debounceDelay)) {
     relayState ^= 0x08;
     lastToggleTime4 = now;
+    DEBUG_PRINTLN("updateRelayState: KEY4 pressed. Toggling relayState bit 3.");
   }
   
   lastKey1 = key1;
@@ -163,8 +208,8 @@ void updateRelayState() {
   lastKey3 = key3;
   lastKey4 = key4;
   
-  // (Display task will use relayState to update the shift register.)
-  digitalWrite(PWR_LED, HIGH);  // Optional: indicate activity.
+  // Indicate relay update activity via LED.
+  digitalWrite(PWR_LED, HIGH);
 }
 
 //---------------------------------------------------------------------
@@ -184,6 +229,9 @@ uint8_t Read_74HC165() {
     }
     digitalWrite(CLK_165, HIGH);
   }
+  DEBUG_PRINT("Read_74HC165: Value read = 0x");
+  if (Temp < 0x10) DEBUG_PRINT("0");
+  DEBUG_PRINTLN(Temp, HEX);
   return Temp;
 }
 
@@ -195,11 +243,13 @@ uint8_t Get_DI_Value() {
   if (Value1 == Value2) {
     return Value1;
   }
+  DEBUG_PRINTLN("Get_DI_Value: Mismatch between reads; returning 0.");
   return 0; // Alternatively, return Value1
 }
 
 // diTestLoop: Reads the DI status and prints it to Serial.
 void diTestLoop() {
+  DEBUG_PRINTLN("diTestLoop: Reading DI values.");
   uint8_t diStatus = Get_DI_Value();
   Serial.printf("DI Status: 0x%02X\n", diStatus);
   delay(1000);
@@ -220,6 +270,7 @@ void sensorTestInit() {
   pinMode(Ii4, INPUT);
   pinMode(PWR_LED, OUTPUT);
   digitalWrite(PWR_LED, LOW);
+  DEBUG_PRINTLN("sensorTestInit: Sensor pins initialized.");
 }
 
 // sensorTestLoop: Reads 8 analog inputs, converts the values, and prints them.
@@ -235,6 +286,13 @@ void sensorTestLoop() {
   analog_value[5] = analogRead(Ii2);
   analog_value[6] = analogRead(Ii3);
   analog_value[7] = analogRead(Ii4);
+
+  DEBUG_PRINT("sensorTestLoop: Analog values: ");
+  for (int i = 0; i < 8; i++) {
+      DEBUG_PRINT(analog_value[i]);
+      DEBUG_PRINT(" ");
+  }
+  DEBUG_PRINTLN("");
 
   in_value[0] = (float)analog_value[0] * 3300 / 4096 / 1000 * 53 / 10 + 0.6;
   in_value[1] = (float)analog_value[1] * 3300 / 4096 / 1000 * 53 / 10 + 0.6;
