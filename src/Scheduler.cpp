@@ -1,901 +1,282 @@
-// Scheduler.cpp
 #include "Scheduler.h"
-#include "Utils.h"
-#include "IOManager.h"
-#include "WebServer.h" // Make sure this is included
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include "IOManager.h"  // Assumed to contain setRelay() or similar relay functions
 
-// Global scheduler state
+// Global state instance.
 SchedulerState schedulerState;
 
-// Mutex for scheduler access
-portMUX_TYPE schedulerMutex = portMUX_INITIALIZER_UNLOCKED;
+// Scheduler task handle.
+static TaskHandle_t schedulerTaskHandle = NULL;
 
-// Handle for the scheduler task
-TaskHandle_t schedulerTaskHandle = NULL;
+// Forward declaration of the scheduler task function.
+static void schedulerTask(void *parameter);
 
-void initScheduler() {
-  debugPrintln("DEBUG: Initializing scheduler...");
-  
-  // Initialize time
-  initSchedulerTime();
-  
-  // Load scheduler state from file
-  loadSchedulerState();
-  
-  // API endpoints are now set up in WebServer.cpp
-  // So we don't need to set them up here anymore
-  
-  debugPrintln("DEBUG: Scheduler initialized");
+// ------------------------------------------------------------
+// Relay execution helper.
+// This spawns a task to activate a relay for the specified duration
+// without blocking the main scheduler loop.
+struct RelayTaskParams {
+  uint8_t relay;
+  uint16_t duration; // in seconds
+};
+
+static void relayTask(void *param) {
+  RelayTaskParams *p = (RelayTaskParams*) param;
+  // Turn relay on (replace with your relay control code)
+  setRelay(p->relay, true);
+  // Wait for the specified duration
+  vTaskDelay(pdMS_TO_TICKS(p->duration * 1000));
+  // Turn relay off
+  setRelay(p->relay, false);
+  delete p;
+  vTaskDelete(NULL);
 }
 
-// Initialize time for the scheduler
-void initSchedulerTime() {
-  debugPrintln("DEBUG: Initializing time for scheduler...");
-  
-  // Configure time zone and NTP servers
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  
-  debugPrintln("DEBUG: Waiting for time to be set...");
-  int retry = 0;
-  const int maxRetries = 1;
+void executeRelayCommand(uint8_t relay, uint16_t duration) {
+  // Allocate parameters for the relay task.
+  RelayTaskParams *p = new RelayTaskParams;
+  p->relay = relay;
+  p->duration = duration;
+  // Create a new task for relay activation.
+  xTaskCreatePinnedToCore(relayTask, "RelayTask", 2048, p, 1, NULL, 1);
+}
+
+// ------------------------------------------------------------
+// Scheduler task: checks every second for events that need to fire.
+static void schedulerTask(void *parameter) {
+  time_t now;
   struct tm timeinfo;
-  
-  while(!getLocalTime(&timeinfo) && retry < maxRetries) {
-    debugPrintln("DEBUG: Failed to obtain time, retrying...");
-    // Scheduler.cpp (continued)
-    retry++;
-    delay(1000);
-  }
-  
-  if (retry >= maxRetries) {
-    debugPrintln("DEBUG: Failed to set time after maximum retries");
-  } else {
-    debugPrintf("DEBUG: Current time: %02d:%02d:%02d\n", 
-               timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-  }
-}
-
-// This task runs the scheduler
-void schedulerTask(void *parameter) {
-  debugPrintln("DEBUG: Scheduler task started");
-  
-  // Run continuously while active
-  // In schedulerTask function
-  for (;;) {
-    // Check current time
-    time_t now;
-    struct tm timeinfo;
-    bool timeIsValid = false;
-    
+  uint16_t currentDay = 0xFFFF; // initialize to an impossible day-of-year
+  while (true) {
     if (getLocalTime(&timeinfo)) {
-      time(&now);
-      timeIsValid = true;
-      
-      // Format current time as HH:MM
-      char timeStr[6];
-      strftime(timeStr, sizeof(timeStr), "%H:%M", &timeinfo);
-      String currentTime = String(timeStr);
-      
-      // Make a local copy of data we need to check while in critical section
-      portENTER_CRITICAL(&schedulerMutex);
-      
-      // Copy just what we need
-      String lightsOnTime = schedulerState.lightSchedule.lightsOnTime;
-      String lightsOffTime = schedulerState.lightSchedule.lightsOffTime;
-      
-      // Update light condition and make a local determination
-      bool isLightsOn = false;
-      
-      if (timeIsValid) {
-        // Convert light schedule times to tm structures for comparison
-        struct tm lightsOnTm = {};
-        struct tm lightsOffTm = {};
-        
-        // Parse lightsOnTime
-        sscanf(lightsOnTime.c_str(), "%d:%d", &lightsOnTm.tm_hour, &lightsOnTm.tm_min);
-        lightsOnTm.tm_year = timeinfo.tm_year;
-        lightsOnTm.tm_mon = timeinfo.tm_mon;
-        lightsOnTm.tm_mday = timeinfo.tm_mday;
-        
-        // Parse lightsOffTime
-        sscanf(lightsOffTime.c_str(), "%d:%d", &lightsOffTm.tm_hour, &lightsOffTm.tm_min);
-        lightsOffTm.tm_year = timeinfo.tm_year;
-        lightsOffTm.tm_mon = timeinfo.tm_mon;
-        lightsOffTm.tm_mday = timeinfo.tm_mday;
-        
-        // Convert to time_t for comparison
-        time_t lightsOnTimeT = mktime(&lightsOnTm);
-        time_t lightsOffTimeT = mktime(&lightsOffTm);
-        
-        // Handle case where lights off is earlier than lights on (spans midnight)
-        if (lightsOffTimeT < lightsOnTimeT) {
-          if (now >= lightsOnTimeT || now < lightsOffTimeT) {
-            schedulerState.currentLightCondition = "Lights On";
-            isLightsOn = true;
-          } else {
-            schedulerState.currentLightCondition = "Lights Off";
-            isLightsOn = false;
-          }
-        } else {
-          if (now >= lightsOnTimeT && now < lightsOffTimeT) {
-            schedulerState.currentLightCondition = "Lights On";
-            isLightsOn = true;
-          } else {
-            schedulerState.currentLightCondition = "Lights Off";
-            isLightsOn = false;
-          }
-        }
-      }
-      
-      // Make copies of event data we need to process
-      // Use local arrays to store copies
-      struct EventData {
-        String id;
-        String time;
-        int duration;
-        int relay;
-      };
-      
-      EventData customEvents[MAX_EVENTS];
-      int customEventsCount = 0;
-      
-      for (int i = 0; i < schedulerState.customEventsCount && i < MAX_EVENTS; i++) {
-        customEvents[i].id = schedulerState.customEvents[i].id;
-        customEvents[i].time = schedulerState.customEvents[i].time;
-        customEvents[i].duration = schedulerState.customEvents[i].duration;
-        customEvents[i].relay = schedulerState.customEvents[i].relay;
-        customEventsCount++;
-      }
-      
-      // Copy relevant schedule data too
-      // Define similar structures for schedules
+      now = time(NULL);
+      // Calculate seconds since midnight.
+      uint32_t secondsSinceMidnight = timeinfo.tm_hour * 3600UL + timeinfo.tm_min * 60UL + timeinfo.tm_sec;
+      uint16_t today = timeinfo.tm_yday; // day of year
 
-      portEXIT_CRITICAL(&schedulerMutex);
-      
-      // Process events with our local copies - outside critical section
-      // Check custom events
-      for (int i = 0; i < customEventsCount; i++) {
-        if (currentTime == customEvents[i].time) {
-          int relay = customEvents[i].relay;
-          int duration = customEvents[i].duration;
-          
-          debugPrintf("DEBUG: Executing custom event for relay %d with duration %d seconds\n", 
-                    relay, duration);
-          
-          executeWatering(relay, duration);
+      // If a new day has begun, reset execution flags.
+      if (today != currentDay) {
+        for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
+          schedulerState.events[i].executedMask = 0;
+        }
+        currentDay = today;
+      }
+
+      // Iterate over each scheduled event.
+      for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
+        Event &e = schedulerState.events[i];
+        uint32_t initialTime = (uint32_t)e.startMinute * 60;  // in seconds
+        uint8_t totalOccurrences = e.repeatCount + 1;
+        // Compute the interval between occurrences.
+        uint32_t interval = (totalOccurrences > 1) ? ((86400UL - initialTime) / totalOccurrences) : 0;
+
+        // Check each occurrence.
+        for (uint8_t n = 0; n < totalOccurrences; n++) {
+          uint32_t occurrenceTime = initialTime + n * interval;
+          // If this occurrence has not yet been executed...
+          if (!(e.executedMask & (1UL << n))) {
+            // If current time is within a 1-second window of the scheduled occurrence.
+            if (secondsSinceMidnight >= occurrenceTime && secondsSinceMidnight < occurrenceTime + 1) {
+              // Trigger the event.
+              executeRelayCommand(e.relay, e.duration);
+              // Mark this occurrence as executed.
+              e.executedMask |= (1UL << n);
+            }
+          }
         }
       }
-      
-      // Similar processing for other schedule types
-      // ...
-      
-      // Recalculate next event
-      calculateNextEvent();
-    } else {
-      debugPrintln("DEBUG: Failed to get local time");
     }
-    
-    // Check every minute
-    vTaskDelay(pdMS_TO_TICKS(60000));
+    // Delay for 1 second.
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
-// Function to start the scheduler task
+// ------------------------------------------------------------
+// Initializes time (via NTP), loads scheduler state, and starts the scheduler task.
+void initScheduler() {
+  // Configure time (using NTP servers).
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  // Wait for time to be set.
+  struct tm timeinfo;
+  int retry = 0;
+  while (!getLocalTime(&timeinfo) && retry < 5) {
+    delay(1000);
+    retry++;
+  }
+  // Set default light schedule if not loaded.
+  schedulerState.lightSchedule.lightsOnTime = "06:00";
+  schedulerState.lightSchedule.lightsOffTime = "18:00";
+  schedulerState.eventCount = 0;
+
+  // Load scheduler state from SPIFFS.
+  loadSchedulerState();
+  // Start the scheduler task.
+  startSchedulerTask();
+}
+
+// ------------------------------------------------------------
+// Starts the scheduler task if not already running.
 void startSchedulerTask() {
   if (schedulerTaskHandle == NULL) {
-    xTaskCreatePinnedToCore(
-      schedulerTask,       // Function to implement the task
-      "SchedulerTask",     // Name of the task
-      12288,                // Stack size in words
-      NULL,                // Task input parameter
-      2,                   // Priority of the task
-      &schedulerTaskHandle, // Task handle
-      1                    // Core (use core 1 like other tasks)
-    );
-    
-    schedulerState.isActive = true;
-    debugPrintln("DEBUG: Scheduler task started");
-  } else {
-    debugPrintln("DEBUG: Scheduler task already running");
+    xTaskCreatePinnedToCore(schedulerTask, "SchedulerTask", 4096, NULL, 1, &schedulerTaskHandle, 1);
   }
 }
 
-// Function to stop the scheduler task
+// Stops the scheduler task.
 void stopSchedulerTask() {
   if (schedulerTaskHandle != NULL) {
     vTaskDelete(schedulerTaskHandle);
     schedulerTaskHandle = NULL;
-    schedulerState.isActive = false;
-    debugPrintln("DEBUG: Scheduler task stopped");
-  } else {
-    debugPrintln("DEBUG: Scheduler task not running");
   }
 }
 
-// Execute watering by turning relay on for specified duration
-void executeWatering(int relay, int duration) {
-  if (relay < 0 || relay > 7) {
-    debugPrintln("DEBUG: Invalid relay number for watering");
-    return;
-  }
-  
-  debugPrintf("DEBUG: Starting watering on relay %d for %d seconds\n", relay, duration);
-  
-  // Set relay bit
-  uint8_t oldRelayState = getRelayState();
-  setRelay(relay, true);
-  
-  debugPrintf("DEBUG: Relay state changed: 0x%02X -> 0x%02X\n", oldRelayState, getRelayState());
-  
-  // Wait for duration
-  delay(duration * 1000);
-  
-  // Clear relay bit
-  oldRelayState = getRelayState();
-  setRelay(relay, false);
-  
-  debugPrintf("DEBUG: Relay state changed: 0x%02X -> 0x%02X\n", oldRelayState, getRelayState());
-}
-
-// Calculate the next scheduled event
-void calculateNextEvent() {
-  // Implementation depends on current time and scheduling logic
-  // This is a simplified version
-  time_t now;
-  struct tm timeinfo;
-  time(&now);
-  
-  // Initialize earliest event time to a far future time
-  time_t earliestEventTime = now + 86400; // 24 hours from now
-  int earliestEventDuration = 0;
-  int earliestEventRelay = 0;
-  bool foundEvent = false;
-  
-  // Check if we have local time
-  if (getLocalTime(&timeinfo)) {
-    // Format current time as HH:MM
-    char timeStr[6];
-    strftime(timeStr, sizeof(timeStr), "%H:%M", &timeinfo);
-    String currentTime = String(timeStr);
-    
-    // Check custom events
-    for (int i = 0; i < schedulerState.customEventsCount; i++) {
-      // Parse event time
-      struct tm eventTm = {};
-      sscanf(schedulerState.customEvents[i].time.c_str(), "%d:%d", 
-            &eventTm.tm_hour, &eventTm.tm_min);
-      eventTm.tm_year = timeinfo.tm_year;
-      eventTm.tm_mon = timeinfo.tm_mon;
-      eventTm.tm_mday = timeinfo.tm_mday;
-      
-      // If event time is earlier than current time, it's for tomorrow
-      if (eventTm.tm_hour < timeinfo.tm_hour || 
-          (eventTm.tm_hour == timeinfo.tm_hour && eventTm.tm_min <= timeinfo.tm_min)) {
-        eventTm.tm_mday += 1;
-      }
-      
-      time_t eventTime = mktime(&eventTm);
-      
-      if (eventTime < earliestEventTime) {
-        earliestEventTime = eventTime;
-        earliestEventDuration = schedulerState.customEvents[i].duration;
-        earliestEventRelay = schedulerState.customEvents[i].relay;
-        foundEvent = true;
-      }
-    }
-    
-    // Process periodic schedules
-    // This is more complex and requires calculating the next occurrence
-    // of each periodic schedule based on its frequency and the light schedule
-    
-    if (foundEvent) {
-      char nextTimeStr[6];
-      struct tm* eventTimeinfo = localtime(&earliestEventTime);
-      strftime(nextTimeStr, sizeof(nextTimeStr), "%H:%M", eventTimeinfo);
-      
-      schedulerState.nextEvent.time = String(nextTimeStr);
-      schedulerState.nextEvent.duration = earliestEventDuration;
-      schedulerState.nextEvent.relay = earliestEventRelay;
-      schedulerState.hasNextEvent = true;
-    } else {
-      schedulerState.hasNextEvent = false;
-    }
-  }
-}
-
-// Handler for saving scheduler state
-void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  debugPrintln("DEBUG: API request received: /api/scheduler/save");
-  
-  // Check if we're getting partial data
-  if(index > 0 || len < total){
-    // If we have partial data, acknowledge but don't try to process it yet
-    if(index + len == total){
-      debugPrintln("DEBUG: Final part of scheduler state received");
-      request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Data received\"}");
-    }
-    return;
-  }
-  
-  // Create a document with a more reasonable size
-  DynamicJsonDocument doc(8192); // Try with a smaller size first
-  
-  // Use ArduinoJson's deserialization buffer instead of using the raw data
-  DeserializationError error = deserializeJson(doc, data, len);
-  
-  if (error) {
-    debugPrintf("DEBUG: JSON parsing error: %s\n", error.c_str());
-    request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"JSON parsing error\"}");
-    return;
-  }
-  
-  // Use a minimalist approach to extract only what we need
-  if (doc.containsKey("lightSchedule")) {
-    JsonObject lightSchedule = doc["lightSchedule"];
-    
-    portENTER_CRITICAL(&schedulerMutex);
-    schedulerState.lightSchedule.lightsOnTime = lightSchedule["lightsOnTime"].as<String>();
-    schedulerState.lightSchedule.lightsOffTime = lightSchedule["lightsOffTime"].as<String>();
-    portEXIT_CRITICAL(&schedulerMutex);
-  }
-  
-  // Lights On schedules
-  if (doc.containsKey("lightsOnSchedules")) {
-    JsonArray lightsOnSchedules = doc["lightsOnSchedules"];
-    schedulerState.lightsOnSchedulesCount = min((int)lightsOnSchedules.size(), MAX_SCHEDULES);
-    
-    for (int i = 0; i < schedulerState.lightsOnSchedulesCount; i++) {
-      JsonObject schedule = lightsOnSchedules[i];
-      schedulerState.lightsOnSchedules[i].id = schedule["id"].as<String>();
-      schedulerState.lightsOnSchedules[i].frequency = schedule["frequency"].as<int>();
-      schedulerState.lightsOnSchedules[i].duration = schedule["duration"].as<int>();
-      schedulerState.lightsOnSchedules[i].relay = schedule["relay"].as<int>();
-    }
-  } else {
-    schedulerState.lightsOnSchedulesCount = 0;
-  }
-  
-  // Lights Off schedules
-  if (doc.containsKey("lightsOffSchedules")) {
-    JsonArray lightsOffSchedules = doc["lightsOffSchedules"];
-    schedulerState.lightsOffSchedulesCount = min((int)lightsOffSchedules.size(), MAX_SCHEDULES);
-    
-    for (int i = 0; i < schedulerState.lightsOffSchedulesCount; i++) {
-      JsonObject schedule = lightsOffSchedules[i];
-      schedulerState.lightsOffSchedules[i].id = schedule["id"].as<String>();
-      schedulerState.lightsOffSchedules[i].frequency = schedule["frequency"].as<int>();
-      schedulerState.lightsOffSchedules[i].duration = schedule["duration"].as<int>();
-      schedulerState.lightsOffSchedules[i].relay = schedule["relay"].as<int>();
-    }
-  } else {
-    schedulerState.lightsOffSchedulesCount = 0;
-  }
-  
-  // Custom events
-  if (doc.containsKey("customEvents")) {
-    JsonArray customEvents = doc["customEvents"];
-    schedulerState.customEventsCount = min((int)customEvents.size(), MAX_EVENTS);
-    
-    for (int i = 0; i < schedulerState.customEventsCount; i++) {
-      JsonObject event = customEvents[i];
-      schedulerState.customEvents[i].id = event["id"].as<String>();
-      schedulerState.customEvents[i].time = event["time"].as<String>();
-      schedulerState.customEvents[i].duration = event["duration"].as<int>();
-      schedulerState.customEvents[i].relay = event["relay"].as<int>();
-    }
-  } else {
-    schedulerState.customEventsCount = 0;
-  }
-  
-  // Templates
-  if (doc.containsKey("templates")) {
-    JsonArray templates = doc["templates"];
-    schedulerState.templatesCount = min((int)templates.size(), MAX_TEMPLATES);
-    
-    for (int i = 0; i < schedulerState.templatesCount; i++) {
-      JsonObject templateObj = templates[i];
-      schedulerState.templates[i].id = templateObj["id"].as<String>();
-      schedulerState.templates[i].name = templateObj["name"].as<String>();
-      
-      if (templateObj.containsKey("lightSchedule")) {
-        JsonObject templateLightSchedule = templateObj["lightSchedule"];
-        schedulerState.templates[i].lightsOnTime = templateLightSchedule["lightsOnTime"].as<String>();
-        schedulerState.templates[i].lightsOffTime = templateLightSchedule["lightsOffTime"].as<String>();
-      } else {
-        schedulerState.templates[i].lightsOnTime = schedulerState.lightSchedule.lightsOnTime;
-        schedulerState.templates[i].lightsOffTime = schedulerState.lightSchedule.lightsOffTime;
-      }
-      
-      // Template lights on schedules
-      if (templateObj.containsKey("lightsOnSchedules")) {
-        JsonArray templateLightsOnSchedules = templateObj["lightsOnSchedules"];
-        schedulerState.templates[i].lightsOnSchedulesCount = min((int)templateLightsOnSchedules.size(), MAX_SCHEDULES);
-        
-        for (int j = 0; j < schedulerState.templates[i].lightsOnSchedulesCount; j++) {
-          JsonObject schedule = templateLightsOnSchedules[j];
-          schedulerState.templates[i].lightsOnSchedules[j].id = schedule["id"].as<String>();
-          schedulerState.templates[i].lightsOnSchedules[j].frequency = schedule["frequency"].as<int>();
-          schedulerState.templates[i].lightsOnSchedules[j].duration = schedule["duration"].as<int>();
-          schedulerState.templates[i].lightsOnSchedules[j].relay = schedule["relay"].as<int>();
-        }
-      } else {
-        schedulerState.templates[i].lightsOnSchedulesCount = 0;
-      }
-      
-      // Template lights off schedules
-      if (templateObj.containsKey("lightsOffSchedules")) {
-        JsonArray templateLightsOffSchedules = templateObj["lightsOffSchedules"];
-        schedulerState.templates[i].lightsOffSchedulesCount = min((int)templateLightsOffSchedules.size(), MAX_SCHEDULES);
-        
-        for (int j = 0; j < schedulerState.templates[i].lightsOffSchedulesCount; j++) {
-          JsonObject schedule = templateLightsOffSchedules[j];
-          schedulerState.templates[i].lightsOffSchedules[j].id = schedule["id"].as<String>();
-          schedulerState.templates[i].lightsOffSchedules[j].frequency = schedule["frequency"].as<int>();
-          schedulerState.templates[i].lightsOffSchedules[j].duration = schedule["duration"].as<int>();
-          schedulerState.templates[i].lightsOffSchedules[j].relay = schedule["relay"].as<int>();
-        }
-      } else {
-        schedulerState.templates[i].lightsOffSchedulesCount = 0;
-      }
-      
-      // Template custom events
-      if (templateObj.containsKey("customEvents")) {
-        JsonArray templateCustomEvents = templateObj["customEvents"];
-        schedulerState.templates[i].customEventsCount = min((int)templateCustomEvents.size(), MAX_EVENTS);
-        
-        for (int j = 0; j < schedulerState.templates[i].customEventsCount; j++) {
-          JsonObject event = templateCustomEvents[j];
-          schedulerState.templates[i].customEvents[j].id = event["id"].as<String>();
-          schedulerState.templates[i].customEvents[j].time = event["time"].as<String>();
-          schedulerState.templates[i].customEvents[j].duration = event["duration"].as<int>();
-          schedulerState.templates[i].customEvents[j].relay = event["relay"].as<int>();
-        }
-      } else {
-        schedulerState.templates[i].customEventsCount = 0;
-      }
-    }
-  }
-  
-  // isActive stays the same unless explicitly changed
-  if (doc.containsKey("isActive")) {
-    bool newActiveState = doc["isActive"].as<bool>();
-    
-    // Only change scheduler state if it's different
-    if (newActiveState != schedulerState.isActive) {
-      schedulerState.isActive = newActiveState;
-      
-      // Start or stop the scheduler task
-      if (newActiveState) {
-        // Exit the critical section before starting the task
-        portEXIT_CRITICAL(&schedulerMutex);
-        startSchedulerTask();
-        portENTER_CRITICAL(&schedulerMutex);
-      } else {
-        // Exit the critical section before stopping the task
-        portEXIT_CRITICAL(&schedulerMutex);
-        stopSchedulerTask();
-        portENTER_CRITICAL(&schedulerMutex);
-      }
-    }
-  }
-  
-  // Recalculate next event
-  calculateNextEvent();
-  
-  // Save to file
-  portEXIT_CRITICAL(&schedulerMutex);
-  saveSchedulerState();
-  
-  request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler state saved\"}");
-}
-
-// Save scheduler state to file
-void saveSchedulerState() {
-  debugPrintln("DEBUG: Saving scheduler state to file");
-  
-  File file = SPIFFS.open(SCHEDULER_FILE, FILE_WRITE);
-  if (!file) {
-    debugPrintln("DEBUG: Failed to open scheduler file for writing");
-    return;
-  }
-  
-  DynamicJsonDocument doc(16384); // Adjust size based on your needs
-  
-  // Light schedule
-  JsonObject lightSchedule = doc.createNestedObject("lightSchedule");
-  lightSchedule["lightsOnTime"] = schedulerState.lightSchedule.lightsOnTime;
-  lightSchedule["lightsOffTime"] = schedulerState.lightSchedule.lightsOffTime;
-  
-  // Lights On schedules
-  JsonArray lightsOnSchedules = doc.createNestedArray("lightsOnSchedules");
-  for (int i = 0; i < schedulerState.lightsOnSchedulesCount; i++) {
-    JsonObject schedule = lightsOnSchedules.createNestedObject();
-    schedule["id"] = schedulerState.lightsOnSchedules[i].id;
-    schedule["frequency"] = schedulerState.lightsOnSchedules[i].frequency;
-    schedule["duration"] = schedulerState.lightsOnSchedules[i].duration;
-    schedule["relay"] = schedulerState.lightsOnSchedules[i].relay;
-  }
-  
-  // Lights Off schedules
-  JsonArray lightsOffSchedules = doc.createNestedArray("lightsOffSchedules");
-  for (int i = 0; i < schedulerState.lightsOffSchedulesCount; i++) {
-    JsonObject schedule = lightsOffSchedules.createNestedObject();
-    schedule["id"] = schedulerState.lightsOffSchedules[i].id;
-    schedule["frequency"] = schedulerState.lightsOffSchedules[i].frequency;
-    schedule["duration"] = schedulerState.lightsOffSchedules[i].duration;
-    schedule["relay"] = schedulerState.lightsOffSchedules[i].relay;
-  }
-  
-  // Custom events
-  JsonArray customEvents = doc.createNestedArray("customEvents");
-  for (int i = 0; i < schedulerState.customEventsCount; i++) {
-    JsonObject event = customEvents.createNestedObject();
-    event["id"] = schedulerState.customEvents[i].id;
-    event["time"] = schedulerState.customEvents[i].time;
-    event["duration"] = schedulerState.customEvents[i].duration;
-    event["relay"] = schedulerState.customEvents[i].relay;
-  }
-  
-  // Templates
-  JsonArray templates = doc.createNestedArray("templates");
-  for (int i = 0; i < schedulerState.templatesCount; i++) {
-    JsonObject templateObj = templates.createNestedObject();
-    templateObj["id"] = schedulerState.templates[i].id;
-    templateObj["name"] = schedulerState.templates[i].name;
-    
-    JsonObject templateLightSchedule = templateObj.createNestedObject("lightSchedule");
-    templateLightSchedule["lightsOnTime"] = schedulerState.templates[i].lightsOnTime;
-    templateLightSchedule["lightsOffTime"] = schedulerState.templates[i].lightsOffTime;
-    
-    // Template lights on schedules
-    JsonArray templateLightsOnSchedules = templateObj.createNestedArray("lightsOnSchedules");
-    for (int j = 0; j < schedulerState.templates[i].lightsOnSchedulesCount; j++) {
-      JsonObject schedule = templateLightsOnSchedules.createNestedObject();
-      schedule["id"] = schedulerState.templates[i].lightsOnSchedules[j].id;
-      schedule["frequency"] = schedulerState.templates[i].lightsOnSchedules[j].frequency;
-      schedule["duration"] = schedulerState.templates[i].lightsOnSchedules[j].duration;
-      schedule["relay"] = schedulerState.templates[i].lightsOnSchedules[j].relay;
-    }
-    
-    // Template lights off schedules
-    JsonArray templateLightsOffSchedules = templateObj.createNestedArray("lightsOffSchedules");
-    for (int j = 0; j < schedulerState.templates[i].lightsOffSchedulesCount; j++) {
-      JsonObject schedule = templateLightsOffSchedules.createNestedObject();
-      schedule["id"] = schedulerState.templates[i].lightsOffSchedules[j].id;
-      schedule["frequency"] = schedulerState.templates[i].lightsOffSchedules[j].frequency;
-      schedule["duration"] = schedulerState.templates[i].lightsOffSchedules[j].duration;
-      schedule["relay"] = schedulerState.templates[i].lightsOffSchedules[j].relay;
-    }
-    
-    // Template custom events
-    JsonArray templateCustomEvents = templateObj.createNestedArray("customEvents");
-    for (int j = 0; j < schedulerState.templates[i].customEventsCount; j++) {
-      JsonObject event = templateCustomEvents.createNestedObject();
-      event["id"] = schedulerState.templates[i].customEvents[j].id;
-      event["time"] = schedulerState.templates[i].customEvents[j].time;
-      event["duration"] = schedulerState.templates[i].customEvents[j].duration;
-      event["relay"] = schedulerState.templates[i].customEvents[j].relay;
-    }
-  }
-  
-  // Other state variables
-  doc["isActive"] = schedulerState.isActive;
-  doc["currentLightCondition"] = schedulerState.currentLightCondition;
-  
-  // Serialize JSON to file
-  if (serializeJson(doc, file) == 0) {
-    debugPrintln("DEBUG: Failed to write scheduler JSON to file");
-  }
-  
-  file.close();
-  debugPrintln("DEBUG: Scheduler state saved to file");
-}
-
-// Load scheduler state from file
+// ------------------------------------------------------------
+// Loads the scheduler state from SPIFFS (JSON format).
 void loadSchedulerState() {
-  debugPrintln("DEBUG: Loading scheduler state from file");
-  
-  // Check if file exists
-  if (!SPIFFS.exists(SCHEDULER_FILE)) {
-    debugPrintln("DEBUG: Scheduler file not found, initializing with defaults");
-    
-    // Set defaults
-    schedulerState.lightSchedule.lightsOnTime = "06:00";
-    schedulerState.lightSchedule.lightsOffTime = "18:00";
-    schedulerState.lightsOnSchedulesCount = 0;
-    schedulerState.lightsOffSchedulesCount = 0;
-    schedulerState.customEventsCount = 0;
-    schedulerState.templatesCount = 0;
-    schedulerState.isActive = false;
-    schedulerState.currentLightCondition = "Unknown";
-    schedulerState.hasNextEvent = false;
-    
-    // Save default state
-    saveSchedulerState();
-    return;
-  }
-  
   File file = SPIFFS.open(SCHEDULER_FILE, FILE_READ);
   if (!file) {
-    debugPrintln("DEBUG: Failed to open scheduler file for reading");
+    // No file exists yet; use defaults.
     return;
   }
-  
-  DynamicJsonDocument doc(16384); // Adjust size based on your needs
-  
-  DeserializationError error = deserializeJson(doc, file);
-  if (error) {
-    debugPrintf("DEBUG: Failed to parse scheduler JSON: %s\n", error.c_str());
+  size_t size = file.size();
+  if (size == 0) {
     file.close();
     return;
   }
-  
+  DynamicJsonDocument doc(2048);
+  DeserializationError error = deserializeJson(doc, file);
   file.close();
-  
-  // Clear current state
-  memset(&schedulerState, 0, sizeof(schedulerState));
-  
-  // Light schedule
-  if (doc.containsKey("lightSchedule")) {
-    JsonObject lightSchedule = doc["lightSchedule"];
-    schedulerState.lightSchedule.lightsOnTime = lightSchedule["lightsOnTime"].as<String>();
-    schedulerState.lightSchedule.lightsOffTime = lightSchedule["lightsOffTime"].as<String>();
-  } else {
-    schedulerState.lightSchedule.lightsOnTime = "06:00";
-    schedulerState.lightSchedule.lightsOffTime = "18:00";
-  }
-  
-  // Lights On schedules
-  if (doc.containsKey("lightsOnSchedules")) {
-    JsonArray lightsOnSchedules = doc["lightsOnSchedules"];
-    schedulerState.lightsOnSchedulesCount = min((int)lightsOnSchedules.size(), MAX_SCHEDULES);
-    
-    for (int i = 0; i < schedulerState.lightsOnSchedulesCount; i++) {
-      JsonObject schedule = lightsOnSchedules[i];
-      schedulerState.lightsOnSchedules[i].id = schedule["id"].as<String>();
-      schedulerState.lightsOnSchedules[i].frequency = schedule["frequency"].as<int>();
-      schedulerState.lightsOnSchedules[i].duration = schedule["duration"].as<int>();
-      schedulerState.lightsOnSchedules[i].relay = schedule["relay"].as<int>();
-    }
-  }
-  
-  // Rest of the parsing code follows similar pattern...
-  // (truncated for brevity)
-  
-  // If the scheduler was active when the device was powered off, restart it
-  if (schedulerState.isActive) {
-    startSchedulerTask();
-  }
-  
-  calculateNextEvent();
-}
-
-// Handler for loading scheduler state
-void handleLoadSchedulerState(AsyncWebServerRequest *request) {
-  debugPrintln("DEBUG: API request received: /api/scheduler/load");
-  
-  DynamicJsonDocument doc(16384);
-  
-  portENTER_CRITICAL(&schedulerMutex);
-  
-  // Light schedule
-  JsonObject lightSchedule = doc.createNestedObject("lightSchedule");
-  lightSchedule["lightsOnTime"] = schedulerState.lightSchedule.lightsOnTime;
-  lightSchedule["lightsOffTime"] = schedulerState.lightSchedule.lightsOffTime;
-  
-// Continuing the handleLoadSchedulerState function
-  // Lights On schedules
-  JsonArray lightsOnSchedules = doc.createNestedArray("lightsOnSchedules");
-  for (int i = 0; i < schedulerState.lightsOnSchedulesCount; i++) {
-    JsonObject schedule = lightsOnSchedules.createNestedObject();
-    schedule["id"] = schedulerState.lightsOnSchedules[i].id;
-    schedule["frequency"] = schedulerState.lightsOnSchedules[i].frequency;
-    schedule["duration"] = schedulerState.lightsOnSchedules[i].duration;
-    schedule["relay"] = schedulerState.lightsOnSchedules[i].relay;
-  }
-  
-  // Lights Off schedules
-  JsonArray lightsOffSchedules = doc.createNestedArray("lightsOffSchedules");
-  for (int i = 0; i < schedulerState.lightsOffSchedulesCount; i++) {
-    JsonObject schedule = lightsOffSchedules.createNestedObject();
-    schedule["id"] = schedulerState.lightsOffSchedules[i].id;
-    schedule["frequency"] = schedulerState.lightsOffSchedules[i].frequency;
-    schedule["duration"] = schedulerState.lightsOffSchedules[i].duration;
-    schedule["relay"] = schedulerState.lightsOffSchedules[i].relay;
-  }
-  
-  // Custom events
-  JsonArray customEvents = doc.createNestedArray("customEvents");
-  for (int i = 0; i < schedulerState.customEventsCount; i++) {
-    JsonObject event = customEvents.createNestedObject();
-    event["id"] = schedulerState.customEvents[i].id;
-    event["time"] = schedulerState.customEvents[i].time;
-    event["duration"] = schedulerState.customEvents[i].duration;
-    event["relay"] = schedulerState.customEvents[i].relay;
-  }
-  
-  // Templates
-  JsonArray templates = doc.createNestedArray("templates");
-  for (int i = 0; i < schedulerState.templatesCount; i++) {
-    JsonObject templateObj = templates.createNestedObject();
-    templateObj["id"] = schedulerState.templates[i].id;
-    templateObj["name"] = schedulerState.templates[i].name;
-    
-    JsonObject templateLightSchedule = templateObj.createNestedObject("lightSchedule");
-    templateLightSchedule["lightsOnTime"] = schedulerState.templates[i].lightsOnTime;
-    templateLightSchedule["lightsOffTime"] = schedulerState.templates[i].lightsOffTime;
-    
-    // Template lights on schedules
-    JsonArray templateLightsOnSchedules = templateObj.createNestedArray("lightsOnSchedules");
-    for (int j = 0; j < schedulerState.templates[i].lightsOnSchedulesCount; j++) {
-      JsonObject schedule = templateLightsOnSchedules.createNestedObject();
-      schedule["id"] = schedulerState.templates[i].lightsOnSchedules[j].id;
-      schedule["frequency"] = schedulerState.templates[i].lightsOnSchedules[j].frequency;
-      schedule["duration"] = schedulerState.templates[i].lightsOnSchedules[j].duration;
-      schedule["relay"] = schedulerState.templates[i].lightsOnSchedules[j].relay;
-    }
-    
-    // Template lights off schedules
-    JsonArray templateLightsOffSchedules = templateObj.createNestedArray("lightsOffSchedules");
-    for (int j = 0; j < schedulerState.templates[i].lightsOffSchedulesCount; j++) {
-      JsonObject schedule = templateLightsOffSchedules.createNestedObject();
-      schedule["id"] = schedulerState.templates[i].lightsOffSchedules[j].id;
-      schedule["frequency"] = schedulerState.templates[i].lightsOffSchedules[j].frequency;
-      schedule["duration"] = schedulerState.templates[i].lightsOffSchedules[j].duration;
-      schedule["relay"] = schedulerState.templates[i].lightsOffSchedules[j].relay;
-    }
-    
-    // Template custom events
-    JsonArray templateCustomEvents = templateObj.createNestedArray("customEvents");
-    for (int j = 0; j < schedulerState.templates[i].customEventsCount; j++) {
-      JsonObject event = templateCustomEvents.createNestedObject();
-      event["id"] = schedulerState.templates[i].customEvents[j].id;
-      event["time"] = schedulerState.templates[i].customEvents[j].time;
-      event["duration"] = schedulerState.templates[i].customEvents[j].duration;
-      event["relay"] = schedulerState.templates[i].customEvents[j].relay;
-    }
-  }
-  
-  // Other state variables
-  doc["isActive"] = schedulerState.isActive;
-  doc["currentLightCondition"] = schedulerState.currentLightCondition;
-  
-  // Next event
-  if (schedulerState.hasNextEvent) {
-    JsonObject nextEvent = doc.createNestedObject("nextEvent");
-    nextEvent["time"] = schedulerState.nextEvent.time;
-    nextEvent["duration"] = schedulerState.nextEvent.duration;
-    nextEvent["relay"] = schedulerState.nextEvent.relay;
-  }
-  
-  portEXIT_CRITICAL(&schedulerMutex);
-  
-  String response;
-  serializeJson(doc, response);
-  
-  request->send(200, "application/json", response);
-}
-
-// Handler for scheduler status
-void handleSchedulerStatus(AsyncWebServerRequest *request) {
-  debugPrintln("DEBUG: API request received: /api/scheduler/status");
-  
-  DynamicJsonDocument doc(1024);
-  
-  portENTER_CRITICAL(&schedulerMutex);
-  
-  doc["isActive"] = schedulerState.isActive;
-  doc["lightCondition"] = schedulerState.currentLightCondition;
-  
-  // Next event
-  if (schedulerState.hasNextEvent) {
-    JsonObject nextEvent = doc.createNestedObject("nextEvent");
-    nextEvent["time"] = schedulerState.nextEvent.time;
-    nextEvent["duration"] = schedulerState.nextEvent.duration;
-    nextEvent["relay"] = schedulerState.nextEvent.relay;
-  }
-  
-  portEXIT_CRITICAL(&schedulerMutex);
-  
-  String response;
-  serializeJson(doc, response);
-  
-  request->send(200, "application/json", response);
-}
-
-// Handler for activating scheduler
-void handleActivateScheduler(AsyncWebServerRequest *request) {
-  debugPrintln("DEBUG: API request received: /api/scheduler/activate");
-  
-  portENTER_CRITICAL(&schedulerMutex);
-  bool wasActive = schedulerState.isActive;
-  portEXIT_CRITICAL(&schedulerMutex);
-  
-  if (wasActive) {
-    request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler already active\"}");
+  if (error) {
+    // JSON error; ignore and use defaults.
     return;
   }
+  // Load light schedule.
+  JsonObject ls = doc["lightSchedule"];
+  schedulerState.lightSchedule.lightsOnTime = ls["lightsOnTime"] | "06:00";
+  schedulerState.lightSchedule.lightsOffTime = ls["lightsOffTime"] | "18:00";
+
+  // Load events.
+  JsonArray events = doc["events"].as<JsonArray>();
+  schedulerState.eventCount = 0;
+  for (JsonObject evt : events) {
+    if (schedulerState.eventCount < MAX_EVENTS) {
+      Event &e = schedulerState.events[schedulerState.eventCount];
+      e.id = evt["id"].as<String>();
+      String timeStr = evt["time"].as<String>(); // expected format "HH:MM"
+      int hour = 0, minute = 0;
+      sscanf(timeStr.c_str(), "%d:%d", &hour, &minute);
+      e.startMinute = hour * 60 + minute;
+      e.duration = evt["duration"].as<uint16_t>();
+      e.relay = evt["relay"].as<uint8_t>();
+      e.repeatCount = evt["repeat"].as<uint8_t>();
+      e.executedMask = 0;
+      schedulerState.eventCount++;
+    }
+  }
+}
+
+// ------------------------------------------------------------
+// Saves the scheduler state to SPIFFS (JSON format).
+void saveSchedulerState() {
+  DynamicJsonDocument doc(2048);
+  JsonObject ls = doc.createNestedObject("lightSchedule");
+  ls["lightsOnTime"] = schedulerState.lightSchedule.lightsOnTime;
+  ls["lightsOffTime"] = schedulerState.lightSchedule.lightsOffTime;
+
+  JsonArray events = doc.createNestedArray("events");
+  for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
+    JsonObject evt = events.createNestedObject();
+    evt["id"] = schedulerState.events[i].id;
+    // Convert startMinute (minutes since midnight) to HH:MM string.
+    uint16_t minutes = schedulerState.events[i].startMinute;
+    uint8_t hour = minutes / 60;
+    uint8_t minute = minutes % 60;
+    char timeStr[6];
+    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
+    evt["time"] = timeStr;
+    evt["duration"] = schedulerState.events[i].duration;
+    evt["relay"] = schedulerState.events[i].relay;
+    evt["repeat"] = schedulerState.events[i].repeatCount;
+  }
+  File file = SPIFFS.open(SCHEDULER_FILE, FILE_WRITE);
+  if (!file) return;
+  serializeJson(doc, file);
+  file.close();
+}
+
+void handleLoadSchedulerState(AsyncWebServerRequest *request) {
+  DynamicJsonDocument doc(1024);
+  JsonObject ls = doc.createNestedObject("lightSchedule");
+  ls["lightsOnTime"] = schedulerState.lightSchedule.lightsOnTime;
+  ls["lightsOffTime"] = schedulerState.lightSchedule.lightsOffTime;
   
+  JsonArray events = doc.createNestedArray("events");
+  for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
+    JsonObject evt = events.createNestedObject();
+    evt["id"] = schedulerState.events[i].id;
+    // Convert startMinute to "HH:MM" format.
+    uint16_t minutes = schedulerState.events[i].startMinute;
+    uint8_t hour = minutes / 60;
+    uint8_t minute = minutes % 60;
+    char timeStr[6];
+    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
+    evt["time"] = timeStr;
+    evt["duration"] = schedulerState.events[i].duration;
+    evt["relay"] = schedulerState.events[i].relay;
+    evt["repeat"] = schedulerState.events[i].repeatCount;
+  }
+  String response;
+  serializeJson(doc, response);
+  request->send(200, "application/json", response);
+}
+
+// ----------------------------------------------------------------
+// API Handler: Return basic status about the scheduler.
+void handleSchedulerStatus(AsyncWebServerRequest *request) {
+  DynamicJsonDocument doc(512);
+  // Check if the scheduler task is running.
+  doc["isActive"] = (schedulerTaskHandle != NULL);
+  doc["eventCount"] = schedulerState.eventCount;
+  String response;
+  serializeJson(doc, response);
+  request->send(200, "application/json", response);
+}
+
+// ----------------------------------------------------------------
+// API Handler: Activate the scheduler.
+void handleActivateScheduler(AsyncWebServerRequest *request) {
   startSchedulerTask();
-  
-  // Save state to make sure active state is persistent
-  saveSchedulerState();
-  
   request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler activated\"}");
 }
 
-// Handler for deactivating scheduler
+// ----------------------------------------------------------------
+// API Handler: Deactivate the scheduler.
 void handleDeactivateScheduler(AsyncWebServerRequest *request) {
-  debugPrintln("DEBUG: API request received: /api/scheduler/deactivate");
-  
-  portENTER_CRITICAL(&schedulerMutex);
-  bool wasActive = schedulerState.isActive;
-  portEXIT_CRITICAL(&schedulerMutex);
-  
-  if (!wasActive) {
-    request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler already inactive\"}");
-    return;
-  }
-  
   stopSchedulerTask();
-  
-  // Save state to make sure inactive state is persistent
-  saveSchedulerState();
-  
   request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler deactivated\"}");
 }
 
-// Handler for manual watering
+// ----------------------------------------------------------------
+// API Handler: Execute manual watering (trigger a relay for a duration).
 void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  debugPrintln("DEBUG: API request received: /api/relay/manual");
-  
+  if (len == 0) {
+    request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No data received\"}");
+    return;
+  }
   DynamicJsonDocument doc(256);
   DeserializationError error = deserializeJson(doc, data, len);
-  
   if (error) {
-    debugPrintf("DEBUG: JSON parsing error: %s\n", error.c_str());
     request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"JSON parsing error\"}");
     return;
   }
-  
-  if (!doc.containsKey("relay") || !doc.containsKey("duration")) {
+  if (doc.containsKey("relay") && doc.containsKey("duration")) {
+    int relay = doc["relay"].as<int>();
+    int duration = doc["duration"].as<int>();
+    executeRelayCommand(relay, duration);
+    request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Manual watering executed\"}");
+  } else {
     request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing relay or duration\"}");
-    return;
   }
-  
-  int relay = doc["relay"].as<int>();
-  int duration = doc["duration"].as<int>();
-  
-  // Validate inputs
-  if (relay < 0 || relay > 7) {
-    request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid relay number\"}");
-    return;
-  }
-  
-  if (duration < 5 || duration > 300) {
-    request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid duration\"}");
-    return;
-  }
-  
-  // Send success response before starting watering
-  // (because watering will block)
-  request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Manual watering started\"}");
-
-  // Execute watering in a new task to avoid blocking the web server
-  xTaskCreate(
-    [](void* parameter) {
-      ManualWateringParams* params = (ManualWateringParams*)parameter;
-      executeWatering(params->relay, params->duration);
-      delete params;
-      vTaskDelete(NULL);
-    },
-    "ManualWateringTask",
-    2048,
-    new ManualWateringParams{relay, duration},
-    1,
-    NULL
-  );
 }

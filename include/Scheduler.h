@@ -1,109 +1,59 @@
-// Scheduler.h
-#ifndef SCHEDULER_H
-#define SCHEDULER_H
+#ifndef SIMPLE_SCHEDULER_H
+#define SIMPLE_SCHEDULER_H
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
-#include "TestMode.h"
-#include "WebServer.h"  // This includes the reference to server
 
-// Initialize scheduler
+// File used for persistence.
+#define SCHEDULER_FILE "/scheduler.json"
+
+// Maximum number of events.
+#define MAX_EVENTS 20
+
+// Structure for informational light schedule (not used for triggering)
+struct LightSchedule {
+  String lightsOnTime;  // e.g. "06:00"
+  String lightsOffTime; // e.g. "18:00"
+};
+
+// Simplified event structure.
+struct Event {
+  String id;
+  uint16_t startMinute;  // minutes from midnight
+  uint16_t duration;     // in seconds
+  uint8_t relay;         // relay number (0–7)
+  uint8_t repeatCount;   // extra repetitions (0 means only once)
+  uint32_t executedMask; // transient flag mask for executed occurrences
+};
+
+// Global scheduler state.
+struct SchedulerState {
+  LightSchedule lightSchedule;
+  Event events[MAX_EVENTS];
+  uint8_t eventCount;
+};
+
+extern SchedulerState schedulerState;
+
+// Initializes time, loads scheduler state, and starts the scheduler task.
 void initScheduler();
 
-// Scheduler control functions
+// Starts/stops the scheduler task.
 void startSchedulerTask();
 void stopSchedulerTask();
-void executeWatering(int relay, int duration);
-void calculateNextEvent();
-void saveSchedulerState();
+
+// Loads and saves scheduler state from/to SPIFFS.
 void loadSchedulerState();
-void initSchedulerTime();
+void saveSchedulerState();
 
-// Task functions
-void schedulerTask(void *parameter);
-void manualWateringTask(void *parameter);
+// (This function is assumed to control the relay hardware.)
+void executeRelayCommand(uint8_t relay, uint16_t duration);
 
-// API handlers
-void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
+// --- New API handler declarations ---
 void handleLoadSchedulerState(AsyncWebServerRequest *request);
 void handleSchedulerStatus(AsyncWebServerRequest *request);
 void handleActivateScheduler(AsyncWebServerRequest *request);
 void handleDeactivateScheduler(AsyncWebServerRequest *request);
 void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
 
-// Constants
-#define SCHEDULER_FILE "/scheduler.json"
-#define MAX_SCHEDULES 50
-#define MAX_EVENTS 20
-#define MAX_TEMPLATES 10
-
-// Helper structure for manual watering task parameters
-struct ManualWateringParams {
-  int relay;
-  int duration;
-};
-
-// Scheduler state structure - matches the JavaScript state object
-struct SchedulerState {
-  struct {
-    String lightsOnTime;
-    String lightsOffTime;
-  } lightSchedule;
-  
-  struct Schedule {
-    String id;
-    int frequency;    // In minutes
-    int duration;     // In seconds
-    int relay;        // Relay number (0-7)
-  };
-  
-  struct Event {
-    String id;
-    String time;      // HH:MM format
-    int duration;     // In seconds
-    int relay;        // Relay number (0-7)
-  };
-  
-  struct Template {
-    String id;
-    String name;
-    String lightsOnTime;
-    String lightsOffTime;
-    Schedule lightsOnSchedules[MAX_SCHEDULES];
-    int lightsOnSchedulesCount;
-    Schedule lightsOffSchedules[MAX_SCHEDULES];
-    int lightsOffSchedulesCount;
-    Event customEvents[MAX_EVENTS];
-    int customEventsCount;
-  };
-  
-  Schedule lightsOnSchedules[MAX_SCHEDULES];
-  int lightsOnSchedulesCount;
-  
-  Schedule lightsOffSchedules[MAX_SCHEDULES];
-  int lightsOffSchedulesCount;
-  
-  Event customEvents[MAX_EVENTS];
-  int customEventsCount;
-  
-  Template templates[MAX_TEMPLATES];
-  int templatesCount;
-  
-  bool isActive;
-  String currentLightCondition;  // "Lights On", "Lights Off", or "Unknown"
-  
-  struct NextEvent {
-    String time;
-    int duration;
-    int relay;
-  } nextEvent;
-  
-  bool hasNextEvent;
-};
-
-// External variables
-extern SchedulerState schedulerState;
-extern portMUX_TYPE schedulerMutex;
-extern TaskHandle_t schedulerTaskHandle;
-
-#endif // SCHEDULER_H
+#endif // SIMPLE_SCHEDULER_H

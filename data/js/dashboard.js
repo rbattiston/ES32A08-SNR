@@ -2,16 +2,18 @@
  * ES32A08 Controller Dashboard JavaScript
  */
 
-// Elements
-const relayGrid = document.querySelector('.relay-grid');
-const buttonGrid = document.querySelector('.button-grid');
-const inputGrid = document.querySelector('.input-grid');
-const currentInputs = document.getElementById('current-inputs');
-const voltageInputs = document.getElementById('voltage-inputs');
-const allOnButton = document.getElementById('all-on');
-const allOffButton = document.getElementById('all-off');
+// Debug helper functions
+function debugPrintln(msg) {
+  console.log("[DEBUG] " + msg);
+}
+function debugPrintf(format, ...args) {
+  console.log("[DEBUG] " + format, ...args);
+}
 
-// State
+// Elements – these will be assigned in createUIElements()
+let relayGrid, buttonGrid, inputGrid, currentInputs, voltageInputs, allOnButton, allOffButton;
+
+// IO state
 let ioState = {
   relays: [],
   buttons: [],
@@ -20,9 +22,22 @@ let ioState = {
   voltageInputs: []
 };
 
-// Create UI elements
+// Create UI elements and assign global element variables
 function createUIElements() {
-  // Create relay toggles
+  debugPrintln("Creating UI elements...");
+  relayGrid = document.querySelector('.relay-grid');
+  buttonGrid = document.querySelector('.button-grid');
+  inputGrid = document.querySelector('.input-grid');
+  currentInputs = document.getElementById('current-inputs');
+  voltageInputs = document.getElementById('voltage-inputs');
+  allOnButton = document.getElementById('all-on');
+  allOffButton = document.getElementById('all-off');
+  
+  if (!relayGrid || !buttonGrid || !inputGrid || !currentInputs || !voltageInputs) {
+    debugPrintln("One or more UI container elements were not found.");
+  }
+  
+  // Create relay toggles (8 relays)
   for (let i = 0; i < 8; i++) {
     const relayElement = document.createElement('div');
     relayElement.className = 'indicator';
@@ -33,10 +48,10 @@ function createUIElements() {
         <span class="slider"></span>
       </label>
     `;
-    relayGrid.appendChild(relayElement);
+    relayGrid && relayGrid.appendChild(relayElement);
   }
-
-  // Create button indicators
+  
+  // Create button indicators (4 buttons)
   for (let i = 0; i < 4; i++) {
     const buttonElement = document.createElement('div');
     buttonElement.className = 'indicator';
@@ -47,10 +62,10 @@ function createUIElements() {
         <span class="value" id="button-value-${i}">OFF</span>
       </div>
     `;
-    buttonGrid.appendChild(buttonElement);
+    buttonGrid && buttonGrid.appendChild(buttonElement);
   }
-
-  // Create input indicators
+  
+  // Create input indicators (8 inputs)
   for (let i = 0; i < 8; i++) {
     const inputElement = document.createElement('div');
     inputElement.className = 'indicator';
@@ -61,10 +76,10 @@ function createUIElements() {
         <span class="value" id="input-value-${i}">OFF</span>
       </div>
     `;
-    inputGrid.appendChild(inputElement);
+    inputGrid && inputGrid.appendChild(inputElement);
   }
-
-  // Create voltage input indicators
+  
+  // Create voltage input indicators (4 channels)
   for (let i = 0; i < 4; i++) {
     const voltageElement = document.createElement('div');
     voltageElement.className = 'indicator';
@@ -72,10 +87,10 @@ function createUIElements() {
       <div class="label">Channel ${i + 1}</div>
       <div class="value" id="voltage-value-${i}">0.00 V</div>
     `;
-    voltageInputs.appendChild(voltageElement);
+    voltageInputs && voltageInputs.appendChild(voltageElement);
   }
   
-  // Create current input indicators
+  // Create current input indicators (4 channels)
   for (let i = 0; i < 4; i++) {
     const currentElement = document.createElement('div');
     currentElement.className = 'indicator';
@@ -83,35 +98,29 @@ function createUIElements() {
       <div class="label">Channel ${i + 1}</div>
       <div class="value" id="current-value-${i}">0.00 mA</div>
     `;
-    currentInputs.appendChild(currentElement);
+    currentInputs && currentInputs.appendChild(currentElement);
   }
+  debugPrintln("UI elements created.");
 }
 
-// Fetch IO status from the API
+// Fetch IO status from the API and update the UI
 async function fetchIOStatus() {
   try {
     const response = await fetch('/api/io/status');
-    
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
-    
     const data = await response.json();
-    
-    // Debug - log received data
-    console.log("IO Status received:", data);
-    console.log("Voltage inputs:", data.voltageInputs);
-    console.log("Current inputs:", data.currentInputs);
-    
+    debugPrintf("IO Status received: %o", data);
     updateUIState(data);
   } catch (error) {
+    debugPrintln("Error fetching IO status: " + error);
     console.error('Error fetching IO status:', error);
   }
 }
 
-// Update UI with new state
+// Update UI with new IO state data
 function updateUIState(data) {
-  // Update internal state
   ioState = data;
   
   // Update relay toggles
@@ -129,7 +138,6 @@ function updateUIState(data) {
     ioState.buttons.forEach(button => {
       const indicator = document.getElementById(`button-${button.id}`);
       const value = document.getElementById(`button-value-${button.id}`);
-      
       if (indicator && value) {
         if (button.state) {
           indicator.className = 'status-indicator status-on';
@@ -147,7 +155,6 @@ function updateUIState(data) {
     ioState.inputs.forEach(input => {
       const indicator = document.getElementById(`input-${input.id}`);
       const value = document.getElementById(`input-value-${input.id}`);
-      
       if (indicator && value) {
         if (input.state) {
           indicator.className = 'status-indicator status-on';
@@ -162,119 +169,108 @@ function updateUIState(data) {
   
   // Update voltage inputs
   if (ioState.voltageInputs && ioState.voltageInputs.length > 0) {
-    console.log("Updating voltage inputs display");
     ioState.voltageInputs.forEach(input => {
       const value = document.getElementById(`voltage-value-${input.id}`);
-      
       if (value) {
-        console.log(`Setting voltage-value-${input.id} to ${input.value.toFixed(2)} V`);
         value.textContent = `${input.value.toFixed(2)} V`;
       } else {
-        console.warn(`Element voltage-value-${input.id} not found`);
+        debugPrintln(`Element voltage-value-${input.id} not found`);
       }
     });
   } else {
-    console.warn("No voltage inputs data available");
+    debugPrintln("No voltage inputs data available");
   }
   
   // Update current inputs
   if (ioState.currentInputs && ioState.currentInputs.length > 0) {
-    console.log("Updating current inputs display");
     ioState.currentInputs.forEach(input => {
       const value = document.getElementById(`current-value-${input.id}`);
-      
       if (value) {
-        console.log(`Setting current-value-${input.id} to ${input.value.toFixed(2)} mA`);
         value.textContent = `${input.value.toFixed(2)} mA`;
       } else {
-        console.warn(`Element current-value-${input.id} not found`);
+        debugPrintln(`Element current-value-${input.id} not found`);
       }
     });
   } else {
-    console.warn("No current inputs data available");
+    debugPrintln("No current inputs data available");
   }
 }
 
-// Set a single relay state
+// Set a single relay state via API
 async function setRelay(relay, state) {
   try {
     const response = await fetch('/api/io/relay', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        relay: relay,
-        state: state
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relay: relay, state: state })
     });
-    
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
-    
-    // Refetch status to update UI
     fetchIOStatus();
   } catch (error) {
+    debugPrintln("Error setting relay: " + error);
     console.error('Error setting relay:', error);
   }
 }
 
-// Set all relay states
+// Set all relay states via API
 async function setAllRelays(states) {
   try {
     const response = await fetch('/api/io/relays', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        states: states
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ states: states })
     });
-    
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
-    
-    // Refetch status to update UI
     fetchIOStatus();
   } catch (error) {
+    debugPrintln("Error setting all relays: " + error);
     console.error('Error setting all relays:', error);
   }
 }
 
-// Add event listeners
+// Add event listeners for relay toggles and all-on/off buttons
 function addEventListeners() {
-  // Relay toggle events
-  relayGrid.addEventListener('change', (event) => {
-    if (event.target.classList.contains('relay-toggle')) {
-      const relay = parseInt(event.target.dataset.relay);
-      const state = event.target.checked;
-      setRelay(relay, state);
-    }
-  });
+  debugPrintln("Adding event listeners...");
+  if (relayGrid) {
+    relayGrid.addEventListener('change', (event) => {
+      if (event.target.classList.contains('relay-toggle')) {
+        const relay = parseInt(event.target.dataset.relay);
+        const state = event.target.checked;
+        debugPrintf("Relay %d toggled to %s", relay, state ? "ON" : "OFF");
+        setRelay(relay, state);
+      }
+    });
+  }
   
-  // All relays on/off events
-  allOnButton.addEventListener('click', () => {
-    setAllRelays([true, true, true, true, true, true, true, true]);
-  });
+  if (allOnButton) {
+    allOnButton.addEventListener('click', () => {
+      debugPrintln("All ON button clicked");
+      setAllRelays([true, true, true, true, true, true, true, true]);
+    });
+  }
   
-  allOffButton.addEventListener('click', () => {
-    setAllRelays([false, false, false, false, false, false, false, false]);
-  });
+  if (allOffButton) {
+    allOffButton.addEventListener('click', () => {
+      debugPrintln("All OFF button clicked");
+      setAllRelays([false, false, false, false, false, false, false, false]);
+    });
+  }
+  debugPrintln("Event listeners added.");
 }
 
-// Initialize the dashboard
+// Initialize the dashboard: create UI, attach listeners, and start status updates
 function initDashboard() {
-  console.log("Initializing dashboard...");
+  debugPrintln("Initializing dashboard...");
   createUIElements();
   addEventListeners();
   fetchIOStatus();
-  
-  // Periodically update IO status
-  setInterval(fetchIOStatus, 500); // Update every 500ms
+  // Update IO status every 500ms
+  setInterval(fetchIOStatus, 500);
 }
 
-// Start everything when the DOM is loaded
+// Start dashboard initialization when DOM is ready
 document.addEventListener('DOMContentLoaded', initDashboard);

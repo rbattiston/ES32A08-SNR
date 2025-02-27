@@ -3,303 +3,91 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ES32A08 Irrigation Scheduler</title>
+  <title>Irrigation Scheduler</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/scheduler.css">
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>ES32A08 Irrigation Scheduler</h1>
+      <h1>Irrigation Scheduler</h1>
       <nav>
-        <a href="/" class="active">Dashboard</a>
+        <a href="/">Dashboard</a>
         <a href="/modbus.html">MODBUS RTU Tester</a>
-        <a href="/scheduler.html">Irrigation Scheduler</a>
+        <a href="/scheduler.html" class="active">Irrigation Scheduler</a>
         <a href="/wifi.html">WiFi Config</a>
       </nav>
     </header>
-    
     <main>
-      <section class="card" id="light-settings">
-        <h2>Light Schedule</h2>
-        <div class="form-grid">
-          <div class="form-group">
-            <label for="lights-on-time">Lights On Time</label>
-            <input type="time" id="lights-on-time" value="06:00">
-          </div>
-          
-          <div class="form-group">
-            <label for="lights-off-time">Lights Off Time</label>
-            <input type="time" id="lights-off-time" value="18:00">
-          </div>
+      <!-- Light Schedule Section -->
+      <section id="light-schedule">
+        <h2>Light Schedule (Informational)</h2>
+        <div class="form-group">
+          <label for="lights-on-time">Lights On Time</label>
+          <input type="time" id="lights-on-time" value="06:00">
         </div>
-        <div class="controls">
-          <button id="save-light-schedule">Save Light Schedule</button>
+        <div class="form-group">
+          <label for="lights-off-time">Lights Off Time</label>
+          <input type="time" id="lights-off-time" value="18:00">
         </div>
       </section>
-      
-      <section class="card" id="watering-schedules">
-        <h2>Watering Schedules</h2>
-        
-        <div class="tabs">
-          <button class="tab-button active" data-tab="lights-on">Lights On</button>
-          <button class="tab-button" data-tab="lights-off">Lights Off</button>
-          <button class="tab-button" data-tab="custom-events">Custom Events</button>
+
+      <!-- Events Section -->
+      <section id="events">
+        <h2>Scheduled Events</h2>
+        <div id="event-list">
+          <!-- Existing events will be rendered here -->
         </div>
-        
-        <div class="tab-content active" id="lights-on-tab">
-          <h3>Lights On Watering Schedule</h3>
-          <div class="schedule-list" id="lights-on-schedules">
-            <!-- Populated by JavaScript -->
-          </div>
-          
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="lights-on-frequency">Watering Frequency</label>
-              <div class="input-group">
-                <input type="number" id="lights-on-frequency" min="1" max="1440" value="60">
-                <select id="lights-on-frequency-unit">
-                  <option value="1">Minutes</option>
-                  <option value="60" selected>Hours</option>
-                </select>
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label for="lights-on-duration">Watering Duration</label>
-              <div class="input-group">
-                <input type="number" id="lights-on-duration" min="10" max="3600" value="30">
-                <span class="input-group-text">Seconds</span>
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label for="lights-on-relay">Output Relay</label>
-              <select id="lights-on-relay">
-                <option value="0">Relay 1</option>
-                <option value="1">Relay 2</option>
-                <option value="2">Relay 3</option>
-                <option value="3">Relay 4</option>
-                <option value="4">Relay 5</option>
-                <option value="5">Relay 6</option>
-                <option value="6">Relay 7</option>
-                <option value="7">Relay 8</option>
-              </select>
-            </div>
-          </div>
-          
-          <div class="controls">
-            <button id="add-lights-on-schedule">Add Schedule</button>
-          </div>
+        <h3>Add New Event</h3>
+        <div class="form-group">
+          <label for="event-time">Start Time</label>
+          <input type="time" id="event-time" value="12:00">
         </div>
-        
-        <div class="tab-content" id="lights-off-tab">
-          <h3>Lights Off Watering Schedule</h3>
-          <div class="schedule-list" id="lights-off-schedules">
-            <!-- Populated by JavaScript -->
-          </div>
-          
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="lights-off-frequency">Watering Frequency</label>
-              <div class="input-group">
-                <input type="number" id="lights-off-frequency" min="1" max="1440" value="240">
-                <select id="lights-off-frequency-unit">
-                  <option value="1">Minutes</option>
-                  <option value="60" selected>Hours</option>
-                </select>
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label for="lights-off-duration">Watering Duration</label>
-              <div class="input-group">
-                <input type="number" id="lights-off-duration" min="10" max="3600" value="15">
-                <span class="input-group-text">Seconds</span>
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label for="lights-off-relay">Output Relay</label>
-              <select id="lights-off-relay">
-                <option value="0">Relay 1</option>
-                <option value="1">Relay 2</option>
-                <option value="2">Relay 3</option>
-                <option value="3">Relay 4</option>
-                <option value="4">Relay 5</option>
-                <option value="5">Relay 6</option>
-                <option value="6">Relay 7</option>
-                <option value="7">Relay 8</option>
-              </select>
-            </div>
-          </div>
-          
-          <div class="controls">
-            <button id="add-lights-off-schedule">Add Schedule</button>
-          </div>
+        <div class="form-group">
+          <label for="event-duration">Duration (seconds)</label>
+          <input type="number" id="event-duration" min="1" max="600" value="30">
         </div>
-        
-        <div class="tab-content" id="custom-events-tab">
-          <h3>Custom Watering Events</h3>
-          <div class="schedule-list" id="custom-events-list">
-            <!-- Populated by JavaScript -->
-          </div>
-          
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="custom-event-time">Event Time</label>
-              <input type="time" id="custom-event-time" value="12:00">
-            </div>
-            
-            <div class="form-group">
-              <label for="custom-event-duration">Watering Duration</label>
-              <div class="input-group">
-                <input type="number" id="custom-event-duration" min="10" max="3600" value="60">
-                <span class="input-group-text">Seconds</span>
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label for="custom-event-relay">Output Relay</label>
-              <select id="custom-event-relay">
-                <option value="0">Relay 1</option>
-                <option value="1">Relay 2</option>
-                <option value="2">Relay 3</option>
-                <option value="3">Relay 4</option>
-                <option value="4">Relay 5</option>
-                <option value="5">Relay 6</option>
-                <option value="6">Relay 7</option>
-                <option value="7">Relay 8</option>
-              </select>
-            </div>
-          </div>
-          
-          <div class="controls">
-            <button id="add-custom-event">Add Event</button>
-          </div>
+        <div class="form-group">
+          <label for="event-relay">Relay</label>
+          <select id="event-relay">
+            <option value="0">Relay 1</option>
+            <option value="1">Relay 2</option>
+            <option value="2">Relay 3</option>
+            <option value="3">Relay 4</option>
+            <option value="4">Relay 5</option>
+            <option value="5">Relay 6</option>
+            <option value="6">Relay 7</option>
+            <option value="7">Relay 8</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="event-repeat">Repeat Count</label>
+          <input type="number" id="event-repeat" min="0" max="20" value="0">
+        </div>
+        <div class="form-group">
+          <label for="event-repeat-interval">Repeat Interval (minutes)</label>
+          <input type="number" id="event-repeat-interval" min="1" max="1440" value="60">
+        </div>
+        <button id="add-event">Add Event</button>
+      </section>
+
+      <!-- Schedule Visualization Section -->
+      <section id="schedule-visualization">
+        <h2>Schedule Visualization</h2>
+        <div id="timeline-container">
+          <!-- Timeline bars for each relay will be generated dynamically -->
         </div>
       </section>
-      
-      <section class="card" id="schedule-templates">
-        <h2>Schedule Templates</h2>
-        
-        <div class="template-controls">
-          <div class="form-group">
-            <label for="template-name">Template Name</label>
-            <input type="text" id="template-name" placeholder="Enter template name">
-          </div>
-          
-          <div class="controls">
-            <button id="save-template">Save Current Schedule as Template</button>
-            <button id="load-template">Load Template</button>
-            <button id="delete-template">Delete Template</button>
-          </div>
-        </div>
-        
-        <div class="template-list" id="saved-templates">
-          <!-- Populated by JavaScript -->
-        </div>
-      </section>
-      
-      <section class="card" id="schedule-calendar">
-        <h2>Schedule Calendar</h2>
-        
-        <div class="calendar-controls">
-          <div class="form-group">
-            <label for="calendar-weeks">Number of Weeks</label>
-            <input type="number" id="calendar-weeks" min="1" max="12" value="6">
-          </div>
-          
-          <div class="controls">
-            <button id="generate-calendar">Generate Calendar</button>
-          </div>
-        </div>
-        
-        <div class="calendar-grid" id="schedule-calendar-grid">
-          <!-- Calendar will be populated by JavaScript -->
-        </div>
-      </section>
-      
-      <section class="card" id="schedule-status">
-        <h2>Scheduler Status</h2>
-        
-        <div class="status-display">
-          <div class="status-item">
-            <div class="status-label">Current Status:</div>
-            <div class="status-value" id="scheduler-status">Inactive</div>
-          </div>
-          
-          <div class="status-item">
-            <div class="status-label">Next Watering Event:</div>
-            <div class="status-value" id="next-event">None scheduled</div>
-          </div>
-          
-          <div class="status-item">
-            <div class="status-label">Current Light Condition:</div>
-            <div class="status-value" id="light-condition">Unknown</div>
-          </div>
-        </div>
-        
-        <div class="controls">
-          <button id="activate-scheduler" class="btn-success">Activate Scheduler</button>
-          <button id="deactivate-scheduler" class="btn-danger">Deactivate Scheduler</button>
-          <button id="manual-watering" class="btn-primary">Manual Watering</button>
-        </div>
+
+      <!-- Scheduler Controls -->
+      <section id="scheduler-controls">
+        <h2>Scheduler Controls</h2>
+        <button id="save-scheduler">Save Scheduler</button>
+        <button id="activate-scheduler">Activate Scheduler</button>
+        <button id="deactivate-scheduler">Deactivate Scheduler</button>
       </section>
     </main>
-    
-    <footer>
-      <p>ES32A08 Controller Setup Tool</p>
-    </footer>
-    
-    <!-- Modal for template selection -->
-    <div class="modal" id="template-modal">
-      <div class="modal-content">
-        <span class="close-modal">&times;</span>
-        <h3>Select Template</h3>
-        <div class="template-selection" id="template-selection-list">
-          <!-- Populated by JavaScript -->
-        </div>
-        <div class="modal-controls">
-          <button id="confirm-template-selection">Load Selected Template</button>
-          <button id="cancel-template-selection">Cancel</button>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Modal for manual watering -->
-    <div class="modal" id="manual-watering-modal">
-      <div class="modal-content">
-        <span class="close-modal">&times;</span>
-        <h3>Manual Watering</h3>
-        <div class="form-grid">
-          <div class="form-group">
-            <label for="manual-watering-relay">Select Relay</label>
-            <select id="manual-watering-relay">
-              <option value="0">Relay 1</option>
-              <option value="1">Relay 2</option>
-              <option value="2">Relay 3</option>
-              <option value="3">Relay 4</option>
-              <option value="4">Relay 5</option>
-              <option value="5">Relay 6</option>
-              <option value="6">Relay 7</option>
-              <option value="7">Relay 8</option>
-            </select>
-          </div>
-          
-          <div class="form-group">
-            <label for="manual-watering-duration">Duration (seconds)</label>
-            <input type="number" id="manual-watering-duration" min="5" max="300" value="30">
-          </div>
-        </div>
-        <div class="modal-controls">
-          <button id="start-manual-watering">Start Watering</button>
-          <button id="cancel-manual-watering">Cancel</button>
-        </div>
-      </div>
-    </div>
   </div>
-  
   <script src="js/scheduler.js"></script>
 </body>
 </html>
