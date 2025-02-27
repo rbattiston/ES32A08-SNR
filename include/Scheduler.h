@@ -1,32 +1,28 @@
-#ifndef SIMPLE_SCHEDULER_H
-#define SIMPLE_SCHEDULER_H
+#ifndef SCHEDULER_H
+#define SCHEDULER_H
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
 
-// File used for persistence.
 #define SCHEDULER_FILE "/scheduler.json"
-
-// Maximum number of events.
 #define MAX_EVENTS 20
 
-// Structure for informational light schedule (not used for triggering)
 struct LightSchedule {
-  String lightsOnTime;  // e.g. "06:00"
-  String lightsOffTime; // e.g. "18:00"
+  String lightsOnTime;
+  String lightsOffTime;
 };
 
-// Simplified event structure.
 struct Event {
   String id;
-  uint16_t startMinute;  // minutes from midnight
+  String time;           // Original HH:MM string from user
+  uint16_t startMinute;  // Computed minutes from midnight (derived from time)
   uint16_t duration;     // in seconds
   uint8_t relay;         // relay number (0–7)
-  uint8_t repeatCount;   // extra repetitions (0 means only once)
-  uint32_t executedMask; // transient flag mask for executed occurrences
+  uint8_t repeatCount;   // number of extra occurrences (0 means one occurrence)
+  uint16_t repeatInterval; // interval in minutes between occurrences
+  uint32_t executedMask; // transient: bitmask tracking which occurrences fired
 };
 
-// Global scheduler state.
 struct SchedulerState {
   LightSchedule lightSchedule;
   Event events[MAX_EVENTS];
@@ -35,25 +31,21 @@ struct SchedulerState {
 
 extern SchedulerState schedulerState;
 
-// Initializes time, loads scheduler state, and starts the scheduler task.
+// Scheduler control functions
 void initScheduler();
-
-// Starts/stops the scheduler task.
 void startSchedulerTask();
 void stopSchedulerTask();
+void executeRelayCommand(uint8_t relay, uint16_t duration);
 
-// Loads and saves scheduler state from/to SPIFFS.
+// Persistence functions
 void loadSchedulerState();
 void saveSchedulerState();
 
-// (This function is assumed to control the relay hardware.)
-void executeRelayCommand(uint8_t relay, uint16_t duration);
-
-// --- New API handler declarations ---
+// API handlers
 void handleLoadSchedulerState(AsyncWebServerRequest *request);
 void handleSchedulerStatus(AsyncWebServerRequest *request);
 void handleActivateScheduler(AsyncWebServerRequest *request);
 void handleDeactivateScheduler(AsyncWebServerRequest *request);
 void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
 
-#endif // SIMPLE_SCHEDULER_H
+#endif // SCHEDULER_H

@@ -2,7 +2,15 @@
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include <time.h>
-#include "IOManager.h"  // Assumed to contain setRelay() or similar relay functions
+#include "IOManager.h"  // Assumed to contain setRelay()
+
+// Define debug functions if not provided elsewhere.
+#ifndef debugPrintln
+  #define debugPrintln(msg) Serial.println(msg)
+#endif
+#ifndef debugPrintf
+  #define debugPrintf(fmt, ...) Serial.printf(fmt, __VA_ARGS__)
+#endif
 
 // Global state instance.
 SchedulerState schedulerState;
@@ -15,8 +23,6 @@ static void schedulerTask(void *parameter);
 
 // ------------------------------------------------------------
 // Relay execution helper.
-// This spawns a task to activate a relay for the specified duration
-// without blocking the main scheduler loop.
 struct RelayTaskParams {
   uint8_t relay;
   uint16_t duration; // in seconds
@@ -24,22 +30,17 @@ struct RelayTaskParams {
 
 static void relayTask(void *param) {
   RelayTaskParams *p = (RelayTaskParams*) param;
-  // Turn relay on (replace with your relay control code)
   setRelay(p->relay, true);
-  // Wait for the specified duration
   vTaskDelay(pdMS_TO_TICKS(p->duration * 1000));
-  // Turn relay off
   setRelay(p->relay, false);
   delete p;
   vTaskDelete(NULL);
 }
 
 void executeRelayCommand(uint8_t relay, uint16_t duration) {
-  // Allocate parameters for the relay task.
   RelayTaskParams *p = new RelayTaskParams;
   p->relay = relay;
   p->duration = duration;
-  // Create a new task for relay activation.
   xTaskCreatePinnedToCore(relayTask, "RelayTask", 2048, p, 1, NULL, 1);
 }
 
@@ -52,43 +53,31 @@ static void schedulerTask(void *parameter) {
   while (true) {
     if (getLocalTime(&timeinfo)) {
       now = time(NULL);
-      // Calculate seconds since midnight.
       uint32_t secondsSinceMidnight = timeinfo.tm_hour * 3600UL + timeinfo.tm_min * 60UL + timeinfo.tm_sec;
-      uint16_t today = timeinfo.tm_yday; // day of year
-
-      // If a new day has begun, reset execution flags.
+      uint16_t today = timeinfo.tm_yday;
       if (today != currentDay) {
         for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
           schedulerState.events[i].executedMask = 0;
         }
         currentDay = today;
       }
-
-      // Iterate over each scheduled event.
       for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
         Event &e = schedulerState.events[i];
-        uint32_t initialTime = (uint32_t)e.startMinute * 60;  // in seconds
+        // Use the precomputed startMinute (derived from e.time)
+        uint32_t initialTime = (uint32_t)e.startMinute * 60;
         uint8_t totalOccurrences = e.repeatCount + 1;
-        // Compute the interval between occurrences.
-        uint32_t interval = (totalOccurrences > 1) ? ((86400UL - initialTime) / totalOccurrences) : 0;
-
-        // Check each occurrence.
+        uint32_t interval = (totalOccurrences > 1) ? (e.repeatInterval * 60UL) : 0; // interval in seconds
         for (uint8_t n = 0; n < totalOccurrences; n++) {
           uint32_t occurrenceTime = initialTime + n * interval;
-          // If this occurrence has not yet been executed...
           if (!(e.executedMask & (1UL << n))) {
-            // If current time is within a 1-second window of the scheduled occurrence.
             if (secondsSinceMidnight >= occurrenceTime && secondsSinceMidnight < occurrenceTime + 1) {
-              // Trigger the event.
               executeRelayCommand(e.relay, e.duration);
-              // Mark this occurrence as executed.
               e.executedMask |= (1UL << n);
             }
           }
         }
       }
     }
-    // Delay for 1 second.
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
@@ -96,23 +85,17 @@ static void schedulerTask(void *parameter) {
 // ------------------------------------------------------------
 // Initializes time (via NTP), loads scheduler state, and starts the scheduler task.
 void initScheduler() {
-  // Configure time (using NTP servers).
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  // Wait for time to be set.
   struct tm timeinfo;
   int retry = 0;
   while (!getLocalTime(&timeinfo) && retry < 5) {
     delay(1000);
     retry++;
   }
-  // Set default light schedule if not loaded.
   schedulerState.lightSchedule.lightsOnTime = "06:00";
   schedulerState.lightSchedule.lightsOffTime = "18:00";
   schedulerState.eventCount = 0;
-
-  // Load scheduler state from SPIFFS.
   loadSchedulerState();
-  // Start the scheduler task.
   startSchedulerTask();
 }
 
@@ -136,10 +119,7 @@ void stopSchedulerTask() {
 // Loads the scheduler state from SPIFFS (JSON format).
 void loadSchedulerState() {
   File file = SPIFFS.open(SCHEDULER_FILE, FILE_READ);
-  if (!file) {
-    // No file exists yet; use defaults.
-    return;
-  }
+  if (!file) return;
   size_t size = file.size();
   if (size == 0) {
     file.close();
@@ -148,29 +128,27 @@ void loadSchedulerState() {
   DynamicJsonDocument doc(2048);
   DeserializationError error = deserializeJson(doc, file);
   file.close();
-  if (error) {
-    // JSON error; ignore and use defaults.
-    return;
-  }
-  // Load light schedule.
+  if (error) return;
+  
   JsonObject ls = doc["lightSchedule"];
   schedulerState.lightSchedule.lightsOnTime = ls["lightsOnTime"] | "06:00";
   schedulerState.lightSchedule.lightsOffTime = ls["lightsOffTime"] | "18:00";
-
-  // Load events.
+  
   JsonArray events = doc["events"].as<JsonArray>();
   schedulerState.eventCount = 0;
   for (JsonObject evt : events) {
     if (schedulerState.eventCount < MAX_EVENTS) {
       Event &e = schedulerState.events[schedulerState.eventCount];
       e.id = evt["id"].as<String>();
-      String timeStr = evt["time"].as<String>(); // expected format "HH:MM"
+      // Read the time string and compute startMinute.
+      e.time = evt["time"].as<String>(); // e.g., "12:00"
       int hour = 0, minute = 0;
-      sscanf(timeStr.c_str(), "%d:%d", &hour, &minute);
+      sscanf(e.time.c_str(), "%d:%d", &hour, &minute);
       e.startMinute = hour * 60 + minute;
       e.duration = evt["duration"].as<uint16_t>();
       e.relay = evt["relay"].as<uint8_t>();
       e.repeatCount = evt["repeat"].as<uint8_t>();
+      e.repeatInterval = evt["repeatInterval"].as<uint16_t>();
       e.executedMask = 0;
       schedulerState.eventCount++;
     }
@@ -180,32 +158,37 @@ void loadSchedulerState() {
 // ------------------------------------------------------------
 // Saves the scheduler state to SPIFFS (JSON format).
 void saveSchedulerState() {
+  debugPrintln("DEBUG: Saving scheduler state to SPIFFS");
+  File file = SPIFFS.open(SCHEDULER_FILE, FILE_WRITE);
+  if (!file) {
+    debugPrintln("DEBUG: Failed to open scheduler file for writing");
+    return;
+  }
+  
   DynamicJsonDocument doc(2048);
   JsonObject ls = doc.createNestedObject("lightSchedule");
   ls["lightsOnTime"] = schedulerState.lightSchedule.lightsOnTime;
   ls["lightsOffTime"] = schedulerState.lightSchedule.lightsOffTime;
-
+  
   JsonArray events = doc.createNestedArray("events");
   for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
     JsonObject evt = events.createNestedObject();
     evt["id"] = schedulerState.events[i].id;
-    // Convert startMinute (minutes since midnight) to HH:MM string.
-    uint16_t minutes = schedulerState.events[i].startMinute;
-    uint8_t hour = minutes / 60;
-    uint8_t minute = minutes % 60;
-    char timeStr[6];
-    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
-    evt["time"] = timeStr;
+    evt["time"] = schedulerState.events[i].time;
     evt["duration"] = schedulerState.events[i].duration;
     evt["relay"] = schedulerState.events[i].relay;
     evt["repeat"] = schedulerState.events[i].repeatCount;
+    evt["repeatInterval"] = schedulerState.events[i].repeatInterval;
   }
-  File file = SPIFFS.open(SCHEDULER_FILE, FILE_WRITE);
-  if (!file) return;
+  
   serializeJson(doc, file);
   file.close();
+  debugPrintln("DEBUG: Scheduler state successfully written to SPIFFS");
 }
 
+
+// ----------------------------------------------------------------
+// API Handler: Return the current scheduler state as JSON.
 void handleLoadSchedulerState(AsyncWebServerRequest *request) {
   DynamicJsonDocument doc(1024);
   JsonObject ls = doc.createNestedObject("lightSchedule");
@@ -216,16 +199,12 @@ void handleLoadSchedulerState(AsyncWebServerRequest *request) {
   for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
     JsonObject evt = events.createNestedObject();
     evt["id"] = schedulerState.events[i].id;
-    // Convert startMinute to "HH:MM" format.
-    uint16_t minutes = schedulerState.events[i].startMinute;
-    uint8_t hour = minutes / 60;
-    uint8_t minute = minutes % 60;
-    char timeStr[6];
-    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
-    evt["time"] = timeStr;
+    // Convert startMinute back to "HH:MM" format using the stored string.
+    evt["time"] = schedulerState.events[i].time;
     evt["duration"] = schedulerState.events[i].duration;
     evt["relay"] = schedulerState.events[i].relay;
     evt["repeat"] = schedulerState.events[i].repeatCount;
+    evt["repeatInterval"] = schedulerState.events[i].repeatInterval;
   }
   String response;
   serializeJson(doc, response);
@@ -236,7 +215,6 @@ void handleLoadSchedulerState(AsyncWebServerRequest *request) {
 // API Handler: Return basic status about the scheduler.
 void handleSchedulerStatus(AsyncWebServerRequest *request) {
   DynamicJsonDocument doc(512);
-  // Check if the scheduler task is running.
   doc["isActive"] = (schedulerTaskHandle != NULL);
   doc["eventCount"] = schedulerState.eventCount;
   String response;
@@ -259,7 +237,7 @@ void handleDeactivateScheduler(AsyncWebServerRequest *request) {
 }
 
 // ----------------------------------------------------------------
-// API Handler: Execute manual watering (trigger a relay for a duration).
+// API Handler: Execute manual watering.
 void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
   if (len == 0) {
     request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"No data received\"}");
