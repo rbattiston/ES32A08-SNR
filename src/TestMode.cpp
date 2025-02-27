@@ -17,8 +17,8 @@
 #ifndef Vi1
   #define Vi1   32
   #define Vi2   33
-  #define Vi3   25
-  #define Vi4   26
+  // #define Vi3   25
+  // #define Vi4   26
   #define Ii1   36
   #define Ii2   39
   #define Ii3   34
@@ -263,8 +263,8 @@ void diTestLoop() {
 void sensorTestInit() {
   pinMode(Vi1, INPUT);
   pinMode(Vi2, INPUT);
-  pinMode(Vi3, INPUT);
-  pinMode(Vi4, INPUT);
+  // pinMode(Vi3, INPUT);
+  // pinMode(Vi4, INPUT);
   pinMode(Ii1, INPUT);
   pinMode(Ii2, INPUT);
   pinMode(Ii3, INPUT);
@@ -281,8 +281,8 @@ void sensorTestLoop() {
 
   analog_value[0] = analogRead(Vi1);
   analog_value[1] = analogRead(Vi2);
-  analog_value[2] = analogRead(Vi3);
-  analog_value[3] = analogRead(Vi4);
+  // analog_value[2] = analogRead(Vi3);
+  // analog_value[3] = analogRead(Vi4);
   analog_value[4] = analogRead(Ii1);
   analog_value[5] = analogRead(Ii2);
   analog_value[6] = analogRead(Ii3);

@@ -183,7 +183,7 @@ void vAnalogTask(void *pvParameters) {
       analog_value[1] = 0;
     }
     
-    try {
+    /* try {
       analog_value[2] = analogRead(AI_V3);
     } catch (...) {
       analog_value[2] = 0;
@@ -193,7 +193,7 @@ void vAnalogTask(void *pvParameters) {
       analog_value[3] = analogRead(AI_V4);
     } catch (...) {
       analog_value[3] = 0;
-    }
+    } */
     
     try {
       analog_value[4] = analogRead(AI_I1);
