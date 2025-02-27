@@ -64,7 +64,8 @@ static unsigned int counter = 0;           // Display counter (0–9999)
 static unsigned long lastCounterUpdate = 0;  // Timestamp for counter update
 
 // Global variable for relay state (each bit corresponds to one relay)
-volatile uint8_t relayState = 0;  // Updated by the relay task
+// Use the variable defined in IOManager.cpp
+extern volatile uint8_t relayState;
 
 //---------------------------------------------------------------------
 // Shift Register Functions for 74HC595 (common to display & relay)
