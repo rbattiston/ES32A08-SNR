@@ -8,6 +8,18 @@
 #include <SPIFFS.h>
 #include "esp_task_wdt.h"
 #include "esp_system.h"
+#include "TimeManager.h"
+
+void testSPIFFSWrite() {
+  File testFile = SPIFFS.open("/test.txt", FILE_WRITE);
+  if (!testFile) {
+    Serial.println("Failed to open test file for writing");
+    return;
+  }
+  testFile.println("This is a test.");
+  testFile.close();
+  listSPIFFSFiles();
+}
 
 // Initialize components
 void setup() {
@@ -33,12 +45,19 @@ void setup() {
   }
   debugPrintln("DEBUG: SPIFFS initialized successfully");
   
+
   // List available files
+  listSPIFFSFiles();
+  testSPIFFSWrite();
+
   listSPIFFSFiles();
   
   // Initialize managers
   initIOManager();
   initWiFiManager();
+  debugPrintln("DEBUG: Initializing Time Manager...");
+  initTimeManager();
+  startTimeManagerTask(); // Optional: to continuously monitor time
   initScheduler();
   initModbusHandler();
   

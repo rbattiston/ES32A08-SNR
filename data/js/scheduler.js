@@ -136,14 +136,16 @@ function addEvent() {
   const eventRepeatEl = document.getElementById('event-repeat');
   const eventRepeatIntervalEl = document.getElementById('event-repeat-interval');
   if (eventTimeEl && eventDurationEl && eventRelayEl && eventRepeatEl && eventRepeatIntervalEl) {
-    const time = eventTimeEl.value;
+    // Convert the time to GMT.
+    const localTime = eventTimeEl.value; // e.g., "15:00"
+    const timeGMT = localTimeToGMT(localTime); // convert to GMT
     const duration = parseInt(eventDurationEl.value);
     const relay = eventRelayEl.value;
     const repeatCount = parseInt(eventRepeatEl.value);
     const repeatInterval = parseInt(eventRepeatIntervalEl.value);
     const newEvent = {
       id: Date.now().toString(),
-      time: time,
+      time: timeGMT, // store time in GMT
       duration: duration,
       relay: relay,
       repeatCount: repeatCount,
@@ -157,6 +159,7 @@ function addEvent() {
     debugPrintln("addEvent(): One or more input elements not found");
   }
 }
+
 
 // -------------------------------
 // Timeline Visualization (Always 1-hour ticks)
@@ -175,6 +178,23 @@ function updateTickMarks(ticksContainer, intervalInMinutes) {
     tick.style.transform = 'translateX(-50%)';
     ticksContainer.appendChild(tick);
   }
+}
+
+function localTimeToGMT(timeStr) {
+  // Parse the local time string "HH:MM"
+  let [hours, minutes] = timeStr.split(':').map(Number);
+  // Compute local minutes since midnight.
+  let localMinutes = hours * 60 + minutes;
+  // getTimezoneOffset() returns the difference (in minutes) from local time to UTC.
+  // For example, if local time is 15:00 and offset is 240 (4 hours behind UTC), then GMT = 15:00 + 240 minutes.
+  let offset = new Date().getTimezoneOffset(); 
+  // Compute GMT minutes (add offset since getTimezoneOffset is positive if local is behind UTC)
+  let gmtMinutes = localMinutes + offset;
+  // Normalize between 0 and 1440.
+  gmtMinutes = ((gmtMinutes % 1440) + 1440) % 1440;
+  let gmtHours = Math.floor(gmtMinutes / 60);
+  let gmtMins = gmtMinutes % 60;
+  return `${gmtHours.toString().padStart(2, '0')}:${gmtMins.toString().padStart(2, '0')}`;
 }
 
 function renderTimeline() {

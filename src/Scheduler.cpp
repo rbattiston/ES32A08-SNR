@@ -37,7 +37,10 @@ static void relayTask(void *param) {
   vTaskDelete(NULL);
 }
 
+uint32_t secondsSinceMidnight = time(NULL) % 86400;
+
 void executeRelayCommand(uint8_t relay, uint16_t duration) {
+  debugPrintf("DEBUG: Executing relay command: relay %d, duration %d seconds\n", relay, duration);
   RelayTaskParams *p = new RelayTaskParams;
   p->relay = relay;
   p->duration = duration;
@@ -47,34 +50,43 @@ void executeRelayCommand(uint8_t relay, uint16_t duration) {
 // ------------------------------------------------------------
 // Scheduler task: checks every second for events that need to fire.
 static void schedulerTask(void *parameter) {
-  time_t now;
-  struct tm timeinfo;
   uint16_t currentDay = 0xFFFF; // initialize to an impossible day-of-year
   while (true) {
-    if (getLocalTime(&timeinfo)) {
-      now = time(NULL);
-      uint32_t secondsSinceMidnight = timeinfo.tm_hour * 3600UL + timeinfo.tm_min * 60UL + timeinfo.tm_sec;
-      uint16_t today = timeinfo.tm_yday;
-      if (today != currentDay) {
-        for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
-          schedulerState.events[i].executedMask = 0;
-        }
-        currentDay = today;
-      }
+    // Use getLocalTime() only for printing if needed, but use time(NULL) for calculations.
+    time_t now = time(NULL);
+    uint32_t secondsSinceMidnight = now % 86400; // current GMT seconds since midnight
+    
+    // Optionally, for debugging, convert now to a tm in GMT:
+    struct tm *gmTime = gmtime(&now);
+    char timeStr[9];
+    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", gmTime);
+    debugPrintf("DEBUG: Current GMT time: %s\n", timeStr);
+    
+    // For day change detection, we can use now / 86400 (number of days since epoch)
+    uint16_t today = now / 86400;
+    if (today != currentDay) {
       for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
-        Event &e = schedulerState.events[i];
-        // Use the precomputed startMinute (derived from e.time)
-        uint32_t initialTime = (uint32_t)e.startMinute * 60;
-        uint8_t totalOccurrences = e.repeatCount + 1;
-        uint32_t interval = (totalOccurrences > 1) ? (e.repeatInterval * 60UL) : 0; // interval in seconds
-        for (uint8_t n = 0; n < totalOccurrences; n++) {
-          uint32_t occurrenceTime = initialTime + n * interval;
-          if (!(e.executedMask & (1UL << n))) {
-            if (secondsSinceMidnight >= occurrenceTime && secondsSinceMidnight < occurrenceTime + 1) {
-              executeRelayCommand(e.relay, e.duration);
-              e.executedMask |= (1UL << n);
-            }
-          }
+        schedulerState.events[i].executedMask = 0;
+      }
+      currentDay = today;
+      debugPrintln("DEBUG: New day detected; resetting executedMask for all events");
+    }
+    
+    // Iterate over each event.
+    for (uint8_t i = 0; i < schedulerState.eventCount; i++) {
+      Event &e = schedulerState.events[i];
+      // e.startMinute now represents the GMT minutes (since the event was stored in GMT)
+      uint32_t initialTime = (uint32_t)e.startMinute * 60;  // in seconds
+      uint8_t totalOccurrences = e.repeatCount + 1;
+      uint32_t interval = (totalOccurrences > 1) ? (e.repeatInterval * 60UL) : 0; // in seconds
+      for (uint8_t n = 0; n < totalOccurrences; n++) {
+        uint32_t occurrenceTime = initialTime + n * interval;
+        debugPrintf("DEBUG: Checking event %d occurrence %d: occurrenceTime=%lu, current=%lu\n", i, n, occurrenceTime, secondsSinceMidnight);
+        // For testing, widen window to 2 seconds
+        if (!(e.executedMask & (1UL << n)) && (secondsSinceMidnight >= occurrenceTime && secondsSinceMidnight < occurrenceTime + 2)) {
+          debugPrintf("DEBUG: Firing event %d occurrence %d: Relay %d for %d seconds\n", i, n, e.relay, e.duration);
+          executeRelayCommand(e.relay, e.duration);
+          e.executedMask |= (1UL << n);
         }
       }
     }
@@ -119,20 +131,39 @@ void stopSchedulerTask() {
 // Loads the scheduler state from SPIFFS (JSON format).
 void loadSchedulerState() {
   File file = SPIFFS.open(SCHEDULER_FILE, FILE_READ);
-  if (!file) return;
+  if (!file) {
+    debugPrintln("DEBUG: scheduler.json not found, using defaults");
+    return;
+  }
   size_t size = file.size();
+  debugPrintf("DEBUG: scheduler.json size: %d bytes\n", size);
   if (size == 0) {
+    debugPrintln("DEBUG: scheduler.json is empty");
     file.close();
     return;
   }
+  
+  String rawContent;
+  while(file.available()){
+    rawContent += (char)file.read();
+  }
+  debugPrintln("DEBUG: Raw scheduler.json content: " + rawContent);
+  
+  file.seek(0, SeekSet);
   DynamicJsonDocument doc(2048);
   DeserializationError error = deserializeJson(doc, file);
   file.close();
-  if (error) return;
+  if (error) {
+    debugPrintf("DEBUG: JSON parsing error: %s\n", error.c_str());
+    return;
+  }
   
   JsonObject ls = doc["lightSchedule"];
   schedulerState.lightSchedule.lightsOnTime = ls["lightsOnTime"] | "06:00";
   schedulerState.lightSchedule.lightsOffTime = ls["lightsOffTime"] | "18:00";
+  debugPrintf("DEBUG: Loaded light schedule: on=%s, off=%s\n", 
+              schedulerState.lightSchedule.lightsOnTime.c_str(), 
+              schedulerState.lightSchedule.lightsOffTime.c_str());
   
   JsonArray events = doc["events"].as<JsonArray>();
   schedulerState.eventCount = 0;
@@ -140,20 +171,27 @@ void loadSchedulerState() {
     if (schedulerState.eventCount < MAX_EVENTS) {
       Event &e = schedulerState.events[schedulerState.eventCount];
       e.id = evt["id"].as<String>();
-      // Read the time string and compute startMinute.
-      e.time = evt["time"].as<String>(); // e.g., "12:00"
+      String timeStr = evt["time"].as<String>(); // expected format "HH:MM"
+      e.time = timeStr;
       int hour = 0, minute = 0;
-      sscanf(e.time.c_str(), "%d:%d", &hour, &minute);
+      sscanf(timeStr.c_str(), "%d:%d", &hour, &minute);
       e.startMinute = hour * 60 + minute;
       e.duration = evt["duration"].as<uint16_t>();
       e.relay = evt["relay"].as<uint8_t>();
-      e.repeatCount = evt["repeat"].as<uint8_t>();
+      // Check for "repeatCount" key
+      if (evt.containsKey("repeatCount"))
+        e.repeatCount = evt["repeatCount"].as<uint8_t>();
+      else
+        e.repeatCount = 0;
       e.repeatInterval = evt["repeatInterval"].as<uint16_t>();
       e.executedMask = 0;
+      debugPrintf("DEBUG: Loaded event: id=%s, time=%s, duration=%d, relay=%d, repeatCount=%d, interval=%d\n",
+                  e.id.c_str(), e.time.c_str(), e.duration, e.relay, e.repeatCount, e.repeatInterval);
       schedulerState.eventCount++;
     }
   }
 }
+
 
 // ------------------------------------------------------------
 // Saves the scheduler state to SPIFFS (JSON format).
@@ -177,14 +215,34 @@ void saveSchedulerState() {
     evt["time"] = schedulerState.events[i].time;
     evt["duration"] = schedulerState.events[i].duration;
     evt["relay"] = schedulerState.events[i].relay;
-    evt["repeat"] = schedulerState.events[i].repeatCount;
+    evt["repeatCount"] = schedulerState.events[i].repeatCount;  // changed key here
     evt["repeatInterval"] = schedulerState.events[i].repeatInterval;
   }
   
-  serializeJson(doc, file);
+  if (serializeJson(doc, file) == 0) {
+    debugPrintln("DEBUG: Failed to write to scheduler file");
+  }
   file.close();
+  
+  // Verify by re-opening the file
+  File verifyFile = SPIFFS.open(SCHEDULER_FILE, FILE_READ);
+  if (!verifyFile) {
+    debugPrintln("DEBUG: Failed to re-open scheduler file for verification");
+    return;
+  }
+  size_t size = verifyFile.size();
+  debugPrintf("DEBUG: scheduler.json size after save: %d bytes\n", size);
+  String rawContent;
+  while (verifyFile.available()){
+    rawContent += (char)verifyFile.read();
+  }
+  debugPrintln("DEBUG: scheduler.json content:\n" + rawContent);
+  verifyFile.close();
+  
   debugPrintln("DEBUG: Scheduler state successfully written to SPIFFS");
 }
+
+
 
 
 // ----------------------------------------------------------------
