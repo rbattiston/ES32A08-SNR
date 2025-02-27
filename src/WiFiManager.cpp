@@ -146,7 +146,7 @@ void handleTestWiFiConnection(AsyncWebServerRequest *request, uint8_t *data, siz
   request->send(200, "application/json", "{\"status\":\"pending\",\"message\":\"WiFi test started\"}");
   
   // Create a simple task to test WiFi
-  xTaskCreate(
+  xTaskCreatePinnedToCore(
     [](void* parameter) {
       wifiTestInProgress = true;
       
@@ -206,10 +206,11 @@ void handleTestWiFiConnection(AsyncWebServerRequest *request, uint8_t *data, siz
       vTaskDelete(NULL);
     },
     "WiFiTest",
-    4096,
+    8192,
     createWiFiTestParam(ssid, password), // Create a parameter block
-    2,
-    NULL
+    1,
+    NULL,
+    0
   );
 }
 
