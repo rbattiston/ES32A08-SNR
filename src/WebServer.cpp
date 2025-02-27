@@ -37,6 +37,9 @@ void initWebServer() {
   // Initialize MODBUS routes
   initModbusRoutes();
   
+  // Initialize Scheduler routes  // ADDED THIS LINE
+  initSchedulerRoutes();          // ADDED THIS LINE
+  
   // Instead of calling the missing functions, implement their functionality directly
   // or comment them out if not needed yet:
   
@@ -134,6 +137,33 @@ void initModbusRoutes() {
     NULL,
     handleModbusRequest
   );
+}
+
+// Implement Scheduler routes  // ADDED THIS ENTIRE FUNCTION
+void initSchedulerRoutes() {
+  debugPrintln("DEBUG: Initializing scheduler routes...");
+  
+  // Scheduler API endpoints
+  server.on("/api/scheduler/save", HTTP_POST, [](AsyncWebServerRequest *request) {
+    debugPrintln("DEBUG: API request received: /api/scheduler/save (simple handler)");
+    request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Settings saved locally only\"}");
+  });
+  
+  server.on("/api/scheduler/load", HTTP_GET, handleLoadSchedulerState);
+  
+  server.on("/api/scheduler/status", HTTP_GET, handleSchedulerStatus);
+  
+  server.on("/api/scheduler/activate", HTTP_POST, handleActivateScheduler);
+  
+  server.on("/api/scheduler/deactivate", HTTP_POST, handleDeactivateScheduler);
+  
+  server.on("/api/relay/manual", HTTP_POST, 
+    [](AsyncWebServerRequest *request) {},
+    NULL,
+    handleManualWatering
+  );
+  
+  debugPrintln("DEBUG: Scheduler routes initialized");
 }
 
 void handleGetIOStatus(AsyncWebServerRequest *request) {

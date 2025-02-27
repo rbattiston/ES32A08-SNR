@@ -12,7 +12,7 @@ let schedulerState = {
   lightsOffSchedules: [],
   customEvents: [],
   templates: [],
-  calendarSchedule: [],
+  calendarSchedule: [],  // Initialize as empty array - this was already here but ensure it's initialized
   isActive: false,
   currentLightCondition: "Unknown",
   nextEvent: null
@@ -111,42 +111,19 @@ function generateId() {
 
 // Helper function to save state to localStorage
 function saveState() {
+  // Always save to localStorage for immediate persistence
   localStorage.setItem('schedulerState', JSON.stringify(schedulerState));
   
-  // Also send to server for persistent storage
-  fetch('/api/scheduler/save', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(schedulerState)
-  })
-  .then(response => {
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    return response.json();
-  })
-  .then(data => {
-    console.log('Scheduler state saved to server:', data);
-  })
-  .catch(error => {
-    console.error('Error saving scheduler state to server:', error);
-  });
-}
-
-// Helper function to load state from localStorage or server
-function loadState() {
-  const savedState = localStorage.getItem('schedulerState');
-  
-  if (savedState) {
-    // First load from localStorage for immediate display
-    schedulerState = JSON.parse(savedState);
-    updateUI();
-  }
-  
-  // Then try to load from server (which may have more up-to-date data)
-  fetch('/api/scheduler/load')
+  // Attempting to save to server - note that server-side storage is currently disabled
+  // to prevent device crashes. Changes are saved locally only.
+  try {
+    fetch('/api/scheduler/save', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(schedulerState)
+    })
     .then(response => {
       if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`);
@@ -154,12 +131,68 @@ function loadState() {
       return response.json();
     })
     .then(data => {
-      console.log('Scheduler state loaded from server:', data);
-      if (data && data.lightSchedule) {
-        schedulerState = data;
-        updateUI();
-        // Update localStorage with server data
-        localStorage.setItem('schedulerState', JSON.stringify(schedulerState));
+      if (data) {
+        console.log('Scheduler state acknowledged by server (local storage only):', data);
+      }
+    })
+    .catch(error => {
+      console.error('Error communicating with server:', error);
+    });
+  } catch (error) {
+    console.error('Exception during fetch operation:', error);
+  }
+}
+
+// Helper function to load state from localStorage or server
+function loadState() {
+  const savedState = localStorage.getItem('schedulerState');
+  
+  if (savedState) {
+    try {
+      // First load from localStorage for immediate display
+      const parsedState = JSON.parse(savedState);
+      
+      // Ensure calendarSchedule exists
+      if (!parsedState.calendarSchedule) {
+        parsedState.calendarSchedule = [];
+      }
+      
+      schedulerState = parsedState;
+      updateUI();
+    } catch (e) {
+      console.error('Error parsing saved state from localStorage:', e);
+      // Initialize with default values if parsing fails
+      schedulerState.calendarSchedule = [];
+    }
+  }
+  
+  // Then try to load from server (which may have more up-to-date data)
+  fetch('/api/scheduler/load')
+    .then(response => {
+      if (!response.ok) {
+        // If endpoint doesn't exist yet (404), don't throw an error
+        // Just log it and continue using localStorage data
+        if (response.status === 404) {
+          console.log('Scheduler API not available yet, using localStorage data');
+          return null;
+        }
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      if (data) {
+        console.log('Scheduler state loaded from server:', data);
+        if (data && data.lightSchedule) {
+          // Ensure calendarSchedule exists in data from server
+          if (!data.calendarSchedule) {
+            data.calendarSchedule = [];
+          }
+          schedulerState = data;
+          updateUI();
+          // Update localStorage with server data
+          localStorage.setItem('schedulerState', JSON.stringify(schedulerState));
+        }
       }
     })
     .catch(error => {
@@ -359,7 +392,8 @@ function renderTemplateSelection() {
 function renderCalendar() {
   scheduleCalendarGrid.innerHTML = '';
   
-  if (schedulerState.calendarSchedule.length === 0) {
+  // Check if calendarSchedule exists and has entries
+  if (!schedulerState.calendarSchedule || schedulerState.calendarSchedule.length === 0) {
     const emptyMessage = document.createElement('div');
     emptyMessage.textContent = 'No calendar generated yet. Use the "Generate Calendar" button to create a schedule.';
     scheduleCalendarGrid.appendChild(emptyMessage);
