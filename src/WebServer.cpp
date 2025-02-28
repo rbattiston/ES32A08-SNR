@@ -156,73 +156,56 @@ void initModbusRoutes() {
 }
 
 // Implement Scheduler routes
+// Implement Scheduler routes
 void initSchedulerRoutes() {
   debugPrintln("DEBUG: Initializing scheduler routes...");
   
-  // Scheduler API endpoints
-  server.on("/api/scheduler/save", HTTP_POST,
-    // onRequest handler (empty)
+  // Serve scheduler HTML page
+  server.on("/scheduler.html", HTTP_GET, [](AsyncWebServerRequest *request){
+    debugPrintln("DEBUG: Serving scheduler.html");
+    request->send(SPIFFS, "/scheduler.html", String(), false);
+  });
+  
+  // Serve scheduler CSS
+  server.on("/css/scheduler.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    debugPrintln("DEBUG: Serving scheduler.css");
+    request->send(SPIFFS, "/css/scheduler.css", "text/css");
+  });
+  
+  // Serve scheduler JavaScript
+  server.on("/js/scheduler.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    debugPrintln("DEBUG: Serving scheduler.js");
+    request->send(SPIFFS, "/js/scheduler.js", "text/javascript");
+  });
+  
+  // API endpoint to load scheduler state
+  server.on("/api/scheduler/load", HTTP_GET, handleLoadSchedulerState);
+  
+  // API endpoint to save scheduler state
+  server.on("/api/scheduler/save", HTTP_POST, 
     [](AsyncWebServerRequest *request) {},
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      DynamicJsonDocument doc(4096);
-      DeserializationError error = deserializeJson(doc, data, len);
-      if (error) {
-        request->send(400, "application/json", "{\"status\":\"error\",\"message\":\"JSON parsing error\"}");
-        return;
-      }
-      
-      // Update the global schedulerState from the JSON payload
-      schedulerState.scheduleCount = doc["scheduleCount"] | 0;
-      schedulerState.currentScheduleIndex = doc["currentScheduleIndex"] | 0;
-      
-      JsonArray schedules = doc["schedules"].as<JsonArray>();
-      schedulerState.scheduleCount = 0; // reset count for reloading
-      for (JsonObject schObj : schedules) {
-        if (schedulerState.scheduleCount < MAX_SCHEDULES) {
-          Schedule &sch = schedulerState.schedules[schedulerState.scheduleCount];
-          sch.name = schObj["name"].as<String>();
-          sch.metadata = schObj["metadata"].as<String>();
-          sch.relayMask = schObj["relayMask"].as<uint8_t>();
-          JsonArray events = schObj["events"].as<JsonArray>();
-          sch.eventCount = 0;
-          for (JsonObject evt : events) {
-            if (sch.eventCount < MAX_EVENTS) {
-              Event &e = sch.events[sch.eventCount];
-              e.id = evt["id"].as<String>();
-              e.time = evt["time"].as<String>();  // Time stored in GMT
-              int hour = 0, minute = 0;
-              sscanf(e.time.c_str(), "%d:%d", &hour, &minute);
-              e.startMinute = hour * 60 + minute;
-              e.duration = evt["duration"].as<uint16_t>();
-              e.executedMask = 0;
-              sch.eventCount++;
-            }
-          }
-          schedulerState.scheduleCount++;
-        }
-      }
-      
-      // Now save the updated state to SPIFFS.
-      saveSchedulerState();
-      debugPrintln("DEBUG: /api/scheduler/save called, state saved to SPIFFS");
-      request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler state saved to SPIFFS\"}");
+      handleSaveSchedulerState(request, data, len);
     }
   );
   
-  
-  server.on("/api/scheduler/load", HTTP_GET, handleLoadSchedulerState);
-  
+  // API endpoint to get scheduler status
   server.on("/api/scheduler/status", HTTP_GET, handleSchedulerStatus);
   
+  // API endpoint to activate scheduler
   server.on("/api/scheduler/activate", HTTP_POST, handleActivateScheduler);
   
+  // API endpoint to deactivate scheduler
   server.on("/api/scheduler/deactivate", HTTP_POST, handleDeactivateScheduler);
   
+  // API endpoint for manual watering
   server.on("/api/relay/manual", HTTP_POST, 
     [](AsyncWebServerRequest *request) {},
     NULL,
-    handleManualWatering
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      handleManualWatering(request, data, len, index, total);
+    }
   );
   
   debugPrintln("DEBUG: Scheduler routes initialized");

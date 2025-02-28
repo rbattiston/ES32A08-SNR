@@ -1,164 +1,207 @@
 /* scheduler.css */
 
-/* Navigation (matches other pages) */
-nav {
-  margin-bottom: 20px;
-  background-color: #f1f1f1;
-  border: 1px solid #ccc;
-  padding: 10px;
-  text-align: center;
-}
-nav a {
-  margin: 0 10px;
-  color: #007bff;
-  text-decoration: none;
-  font-weight: bold;
-}
-nav a.active {
-  text-decoration: underline;
+/* Active schedules section styles */
+#active-schedules-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 15px;
+  margin-top: 10px;
 }
 
-/* Container and section styling */
-.container {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 20px;
-}
-header h1 {
-  text-align: center;
-  margin-bottom: 10px;
-}
-section {
-  margin-bottom: 30px;
-  padding: 20px;
-  border: 1px solid #ccc;
+.active-schedule-box {
+  background-color: #f0f8ff;
+  border: 2px solid #007bff;
   border-radius: 5px;
+  padding: 15px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
-h2 {
-  margin-bottom: 15px;
-  color: #007bff;
-}
-h3 {
+
+.active-schedule-box h3 {
+  margin-top: 0;
   margin-bottom: 10px;
-  color: #333;
+  color: #007bff;
+  font-size: 1.2em;
 }
-.form-group {
-  margin-bottom: 15px;
-}
-.form-group label {
-  display: block;
-  font-weight: bold;
-  margin-bottom: 5px;
-}
-.form-group input,
-.form-group select {
-  width: 100%;
-  padding: 8px;
+
+.active-schedule-box h4 {
+  margin: 10px 0 5px 0;
+  color: #555;
   font-size: 1em;
-  box-sizing: border-box;
 }
-button {
-  padding: 10px 15px;
-  font-size: 1em;
-  color: #fff;
-  background-color: #007bff;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
+
+.schedule-metadata {
+  font-size: 0.9em;
+  color: #555;
+  margin-bottom: 10px;
+}
+
+.schedule-events-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 0.9em;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.schedule-controls {
+  margin-top: 10px;
+  text-align: right;
+}
+
+/* General styles for the scheduler interface */
+.grid-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.help-text {
+  font-size: 0.85em;
+  color: #666;
+  margin-top: 5px;
+}
+
+/* Schedule selection styles */
+#schedule-dropdown {
+  min-width: 250px;
   margin-right: 10px;
 }
-button:hover {
-  background-color: #0056b3;
+
+/* Event list styles */
+.event-list-container {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  padding: 10px;
+  background-color: #f9f9f9;
 }
-#event-list .event-item {
+
+.event-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px;
-  border-bottom: 1px solid #ddd;
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  transition: background-color 0.2s;
 }
-#event-list .event-item:last-child {
+
+.event-item:hover {
+  background-color: #f0f0f0;
+}
+
+.event-item:last-child {
   border-bottom: none;
 }
-.event-item button {
+
+.delete-event {
   background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 0.85em;
 }
-.event-item button:hover {
+
+.delete-event:hover {
   background-color: #c82333;
 }
 
-/* Timeline Visualization */
+/* Timeline styles */
 #timeline-container {
   position: relative;
-  border: 1px solid #ccc;
-  background-color: #fafafa;
-  padding: 10px;
-  margin-top: 20px;
-  height: 200px;
-}
-.timeline-relay {
-  margin-bottom: 15px;
-}
-.timeline-label {
-  font-weight: bold;
-  margin-bottom: 5px;
-}
-.timeline-bar-container {
-  position: relative;
-  height: 30px;
-  overflow: hidden;
+  height: 100px;
   border: 1px solid #ddd;
-  background-color: #f8f8f8;
-  margin-bottom: 10px;
+  border-radius: 4px;
+  margin: 15px 0;
+  overflow: hidden;
 }
-.timeline-bar {
-  position: relative;
-  height: 100%;
-  width: 100%;
-  transition: transform 0.2s ease;
-}
+
 .timeline-event {
   position: absolute;
-  height: 100%;
-  background-color: rgba(0, 123, 255, 0.5);
+  height: 60%;
+  top: 20%;
+  background-color: rgba(0, 123, 255, 0.6);
   border: 1px solid #007bff;
+  border-radius: 3px;
   cursor: pointer;
+  transition: background-color 0.2s;
 }
-.timeline-ticks {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  pointer-events: none;
-  height: 100%;
+
+.timeline-event:hover {
+  background-color: rgba(0, 123, 255, 0.8);
 }
+
 .tick-mark {
-  position: absolute;
-  top: 0;
-  font-size: 10px;
-  color: #333;
-  transform: translateX(-50%);
+  color: #666;
+  font-size: 0.7em;
 }
+
 .current-time-line {
   position: absolute;
   top: 0;
-  bottom: 0;
+  height: 100%;
   width: 2px;
   background-color: red;
   z-index: 10;
 }
 
-/* Background for lights on/off */
-.timeline-bg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
+/* Button styles */
+.controls {
+  display: flex;
+  gap: 10px;
+  margin: 15px 0;
 }
 
-/* Modal Styles */
+.btn-primary {
+  background-color: #007bff;
+}
+
+.btn-secondary {
+  background-color: #6c757d;
+}
+
+.btn-success {
+  background-color: #28a745;
+}
+
+.btn-danger {
+  background-color: #dc3545;
+}
+
+.btn-primary:hover {
+  background-color: #0069d9;
+}
+
+.btn-secondary:hover {
+  background-color: #5a6268;
+}
+
+.btn-success:hover {
+  background-color: #218838;
+}
+
+.btn-danger:hover {
+  background-color: #c82333;
+}
+
+.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Modal styles */
 .modal {
   display: none;
   position: fixed;
@@ -167,9 +210,9 @@ button:hover {
   top: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0,0,0,0.4);
-  animation: fadeIn 0.3s;
+  background-color: rgba(0, 0, 0, 0.4);
 }
+
 .modal-content {
   position: relative;
   background-color: #fff;
@@ -177,13 +220,27 @@ button:hover {
   padding: 20px;
   border-radius: 5px;
   width: 300px;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
 }
+
 .modal-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
   margin-top: 20px;
-  text-align: right;
 }
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .grid-form {
+    grid-template-columns: 1fr;
+  }
+  
+  .controls {
+    flex-direction: column;
+  }
+  
+  .controls button {
+    width: 100%;
+  }
 }

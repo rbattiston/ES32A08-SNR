@@ -10,7 +10,7 @@
 <body>
   <div class="container">
     <header>
-      <h1>Irrigation Scheduler</h1>
+      <h1>Irrigation Controller Scheduler</h1>
       <nav>
         <a href="/">Dashboard</a>
         <a href="/modbus.html">MODBUS RTU Tester</a>
@@ -18,32 +18,46 @@
         <a href="/wifi.html">WiFi Config</a>
       </nav>
     </header>
+    
     <main>
+      <!-- Active Schedules Section -->
+      <section id="active-schedules" class="card">
+        <h2>Active Schedules</h2>
+        <div id="active-schedules-container">
+          <!-- Active schedules will be rendered here -->
+        </div>
+      </section>
+      
       <!-- Schedule Selection -->
-      <section id="schedule-selection">
+      <section id="schedule-selection" class="card">
         <h2>Select Schedule</h2>
-        <select id="schedule-dropdown"></select>
-        <button id="new-schedule">New Schedule</button>
+        <div class="form-group">
+          <select id="schedule-dropdown"></select>
+          <button id="new-schedule" class="btn-secondary">New Schedule</button>
+        </div>
       </section>
       
       <!-- Schedule Settings -->
-      <section id="schedule-settings">
+      <section id="schedule-settings" class="card">
         <h2>Schedule Settings</h2>
         <div class="form-group">
           <label for="schedule-name">Schedule Name</label>
           <input type="text" id="schedule-name" placeholder="Enter schedule name">
         </div>
+        
         <div class="form-group">
           <label for="lights-on-time">Lights On Time (Local)</label>
           <input type="time" id="lights-on-time" value="06:00">
         </div>
+        
         <div class="form-group">
           <label for="lights-off-time">Lights Off Time (Local)</label>
           <input type="time" id="lights-off-time" value="18:00">
         </div>
+        
         <div class="form-group">
-          <label>Relay Mask</label>
-          <div id="relay-mask">
+          <label>Relay Assignments</label>
+          <div id="relay-mask" class="checkbox-grid">
             <label><input type="checkbox" data-relay="0"> Relay 1</label>
             <label><input type="checkbox" data-relay="1"> Relay 2</label>
             <label><input type="checkbox" data-relay="2"> Relay 3</label>
@@ -53,81 +67,101 @@
             <label><input type="checkbox" data-relay="6"> Relay 7</label>
             <label><input type="checkbox" data-relay="7"> Relay 8</label>
           </div>
+          <p class="help-text">Assign relays to this schedule. A relay can only be assigned to one active schedule.</p>
+        </div>
+      </section>
+      
+      <!-- Schedule Visualization -->
+      <section id="schedule-visualization" class="card">
+        <h2>Schedule Visualization (24-hour view)</h2>
+        <div id="timeline-container">
+          <!-- Timeline will be rendered here -->
         </div>
       </section>
       
       <!-- Events Section -->
-      <section id="events">
+      <section id="events" class="card">
         <h2>Scheduled Events</h2>
-        <div id="event-list">
-          <!-- Event list for active schedule -->
+        <div id="event-list" class="event-list-container">
+          <!-- Event list will be rendered here -->
         </div>
+        
         <h3>Add New Event</h3>
-        <div class="form-group">
-          <label for="event-time">Start Time (Local)</label>
-          <input type="time" id="event-time" value="12:00">
+        <div class="grid-form">
+          <div class="form-group">
+            <label for="event-time">Start Time (Local)</label>
+            <input type="time" id="event-time" value="12:00">
+            <p class="help-text">When the relay turns ON</p>
+          </div>
+          
+          <div class="form-group">
+            <label for="event-duration">Duration (seconds)</label>
+            <input type="number" id="event-duration" min="1" max="3600" value="300" step="1">
+            <p class="help-text">How long the relay stays ON</p>
+          </div>
+          
+          <div class="form-group">
+            <label for="event-repeat">Repeat Count</label>
+            <input type="number" id="event-repeat" min="0" max="20" value="0" step="1">
+            <p class="help-text">Number of repetitions (0 = no repeats)</p>
+          </div>
+          
+          <div class="form-group">
+            <label for="event-repeat-interval">Repeat Interval (minutes)</label>
+            <input type="number" id="event-repeat-interval" min="1" max="1440" value="60" step="1">
+            <p class="help-text">Time between repetitions</p>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="event-duration">Duration (seconds)</label>
-          <input type="number" id="event-duration" min="1" max="600" value="30">
-        </div>
-        <div class="form-group">
-          <label for="event-repeat">Repeat Count</label>
-          <input type="number" id="event-repeat" min="0" max="20" value="0">
-        </div>
-        <div class="form-group">
-          <label for="event-repeat-interval">Repeat Interval (minutes)</label>
-          <input type="number" id="event-repeat-interval" min="1" max="1440" value="60">
-        </div>
-        <button id="add-event">Add Event</button>
-      </section>
-      
-      <!-- Timeline Visualization -->
-      <section id="schedule-visualization">
-        <h2>Schedule Visualization</h2>
-        <div id="timeline-container">
-          <!-- A single timeline bar will be drawn here -->
+        
+        <div class="controls">
+          <button id="add-event">Add Event</button>
         </div>
       </section>
       
       <!-- Scheduler Controls -->
-      <section id="scheduler-controls">
+      <section id="scheduler-controls" class="card">
         <h2>Scheduler Controls</h2>
-        <button id="save-schedule">Save Schedule</button>
-        <button id="activate-scheduler">Activate Scheduler</button>
-        <button id="deactivate-scheduler">Deactivate Scheduler</button>
+        <div class="controls">
+          <button id="save-schedule" class="btn-primary">Save Schedule</button>
+          <button id="activate-scheduler" class="btn-success">Activate Scheduler</button>
+          <button id="deactivate-scheduler" class="btn-danger">Deactivate Scheduler</button>
+        </div>
+        <p class="help-text">
+          The scheduler must be activated to execute scheduled events. 
+          Save your schedule before activating to ensure all changes are applied.
+        </p>
       </section>
-      
-      <!-- Removed Time Zone Selection Section -->
-      
     </main>
+    
+    <footer>
+      <p>ESP32 Irrigation Controller</p>
+    </footer>
   </div>
   
-  <!-- Modal for Editing an Event -->
+  <!-- Edit Event Modal -->
   <div id="edit-modal" class="modal">
     <div class="modal-content">
       <h3>Edit Event</h3>
-      <form id="edit-form">
-        <div class="form-group">
-          <label for="edit-hour">Hour</label>
-          <select id="edit-hour"></select>
-        </div>
-        <div class="form-group">
-          <label for="edit-minute">Minute</label>
-          <select id="edit-minute"></select>
-        </div>
-        <div class="form-group">
-          <label for="edit-duration">Duration (seconds)</label>
-          <input type="number" id="edit-duration" min="1" max="600">
-        </div>
-        <div class="modal-controls">
-          <button type="button" id="modal-save">Save</button>
-          <button type="button" id="modal-cancel">Cancel</button>
-        </div>
-      </form>
+      <div class="form-group">
+        <label for="edit-hour">Hour</label>
+        <select id="edit-hour"></select>
+      </div>
+      <div class="form-group">
+        <label for="edit-minute">Minute</label>
+        <select id="edit-minute"></select>
+      </div>
+      <div class="form-group">
+        <label for="edit-duration">Duration (seconds)</label>
+        <input type="number" id="edit-duration" min="1" max="3600" step="1">
+      </div>
+      <div class="modal-controls">
+        <button type="button" id="modal-save" class="btn-primary">Save</button>
+        <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>
+      </div>
     </div>
   </div>
   
-  <script src="js/scheduler.js"></script>
+  <!-- Use the bundled script instead of the single file -->
+  <script src="js/scheduler-bundle.js"></script>
 </body>
 </html>
