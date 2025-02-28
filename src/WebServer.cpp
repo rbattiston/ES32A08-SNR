@@ -80,7 +80,7 @@ void initWebServer() {
     request->send(SPIFFS, "/css/scheduler.css", "text/css");
   });
   
-  server.on("/js/scheduler.js", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/js/scheduler-bundle.js", HTTP_GET, [](AsyncWebServerRequest *request){
     debugPrintln("DEBUG: Serving scheduler.js");
     request->send(SPIFFS, "/js/scheduler.js", "text/javascript");
   });
@@ -173,7 +173,7 @@ void initSchedulerRoutes() {
   });
   
   // Serve scheduler JavaScript
-  server.on("/js/scheduler.js", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/js/scheduler-bundle.js", HTTP_GET, [](AsyncWebServerRequest *request){
     debugPrintln("DEBUG: Serving scheduler.js");
     request->send(SPIFFS, "/js/scheduler.js", "text/javascript");
   });
