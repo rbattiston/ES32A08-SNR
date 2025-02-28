@@ -2,9 +2,9 @@
  * Main entry point for the Irrigation Scheduler
  */
 import { debugPrintln } from './constants';
-import { loadSchedulerState, saveSchedulerState, createNewSchedule, updateActiveScheduleFromUI } from './state';
+import { loadSchedulerState, saveSchedulerState, createNewSchedule } from './state';
 import { initUI, populateScheduleDropdown, loadActiveSchedule, updateAllScheduleViews } from './ui/core';
-import { renderEventList, renderTimeline, addEvent, initModalListeners, startTimelineUpdates } from './ui/events';
+import { renderEventList, renderTimeline, addEvent, initModalListeners } from './ui/events';
 import { renderActiveSchedules } from './ui/active-schedules';
 import { updateSchedulerStatus, activateScheduler, deactivateScheduler } from './api';
 
@@ -19,7 +19,9 @@ async function initScheduler() {
   initModalListeners();
   
   // Start timeline updates
-  startTimelineUpdates();
+  import('./ui/timeline').then(timeline => {
+    timeline.startTimelineUpdates();
+  });
   
   // Load scheduler state
   const success = await loadSchedulerState();
@@ -82,7 +84,7 @@ function bindEventListeners() {
   }
   
   // Listen for schedule selection events
-  document.addEventListener('scheduleSelected', (e) => {
+  document.addEventListener('scheduleSelected', () => {
     loadActiveSchedule();
   });
 }
