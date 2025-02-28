@@ -16,8 +16,36 @@ bool stationConnected = false;
 void initWiFiManager() {
   debugPrintln("DEBUG: Initializing WiFi manager...");
   
-  // Setup dual WiFi mode
-  setupDualWiFi();
+  // Load WiFi configuration first
+  loadWiFiConfig();
+  
+  // Set WiFi event handler
+  WiFi.onEvent(WiFiEventHandler);
+  
+  // Start with AP mode only to ensure it's available immediately
+  WiFi.mode(WIFI_AP);
+  
+  // Configure and start AP
+  if (WiFi.softAP(AP_SSID, AP_PASSWORD)) {
+    debugPrintln("DEBUG: AP Mode initialized successfully");
+  } else {
+    debugPrintln("DEBUG: Failed to initialize AP Mode!");
+  }
+  
+  // Short delay to ensure AP is fully started
+  delay(100);
+  
+  IPAddress apIP = WiFi.softAPIP();
+  debugPrintln("DEBUG: AP Mode IP Address: ");
+  debugPrintln(apIP.toString().c_str());
+  
+  // If STA mode is enabled, connect to WiFi network after AP is ready
+  if (wifiStationConfig.enabled && strlen(wifiStationConfig.ssid) > 0) {
+    debugPrintf("DEBUG: Setting up Station mode, connecting to: %s\n", wifiStationConfig.ssid);
+    WiFi.mode(WIFI_AP_STA);  // Set dual mode
+    WiFi.begin(wifiStationConfig.ssid, wifiStationConfig.password);
+    // Connection will be handled asynchronously by the event handler
+  }
   
   debugPrintln("DEBUG: WiFi manager initialized");
 }
@@ -30,6 +58,56 @@ const char* getAPPassword() {
   return AP_PASSWORD;
 }
 
+void WiFiEventHandler(WiFiEvent_t event) {
+  // Declare variables outside the switch statement to avoid jump errors
+  struct tm timeinfo;
+  char timeStr[64];
+  int retry;
+  
+  switch (event) {
+    case SYSTEM_EVENT_STA_GOT_IP:
+      debugPrintln("DEBUG: WiFi connected! IP address: ");
+      debugPrintln(WiFi.localIP().toString().c_str());
+      stationConnected = true;
+      
+      // Now that we have Internet, sync time with NTP
+      debugPrintln("DEBUG: WiFi connected, initializing NTP time sync...");
+      configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+      
+      // Check if time was set successfully
+      retry = 0;
+      while (!getLocalTime(&timeinfo) && retry < 5) {
+        debugPrintln("DEBUG: Waiting for NTP time sync...");
+        delay(1000);
+        retry++;
+      }
+      
+      if (retry < 5) {
+        strftime(timeStr, sizeof(timeStr), "%c", &timeinfo);
+        debugPrintf("DEBUG: Time synchronized: %s\n", timeStr);
+      } else {
+        debugPrintln("DEBUG: NTP time sync timeout, will retry later");
+      }
+      break;
+      
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+      debugPrintln("DEBUG: WiFi lost connection");
+      stationConnected = false;
+      break;
+      
+    default:
+      break;
+  }
+}
+
+void setupDualWiFi() {
+  // This function is now replaced by the sequence in initWiFiManager
+  // It's kept for backward compatibility but just calls initWiFiManager
+  initWiFiManager();
+}
+
+// The remaining functions are unchanged
+// ...
 void handleGetWiFiStatus(AsyncWebServerRequest *request) {
   debugPrintln("DEBUG: API request received: /api/wifi/status");
   
@@ -264,53 +342,6 @@ void loadWiFiConfig() {
   wifiStationConfig.enabled = doc["enabled"] | false;
 }
 
-void WiFiEventHandler(WiFiEvent_t event) {
-  switch (event) {
-    case SYSTEM_EVENT_STA_GOT_IP:
-      debugPrintln("DEBUG: WiFi connected! IP address: ");
-      debugPrintln(WiFi.localIP().toString().c_str());
-      stationConnected = true;
-      
-      // Now that we have Internet, sync time with NTP
-      configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-      break;
-      
-    case SYSTEM_EVENT_STA_DISCONNECTED:
-      debugPrintln("DEBUG: WiFi lost connection");
-      stationConnected = false;
-      break;
-      
-    default:
-      break;
-  }
-}
-
-void setupDualWiFi() {
-  // Load WiFi configuration
-  loadWiFiConfig();
-  
-  // Set WiFi event handler
-  WiFi.onEvent(WiFiEventHandler);
-  
-  // Always start AP mode
-  WiFi.softAP(AP_SSID, AP_PASSWORD);
-  IPAddress apIP = WiFi.softAPIP();
-  debugPrintln("DEBUG: AP Mode IP Address: ");
-  debugPrintln(apIP.toString().c_str());
-  
-  // If STA mode is enabled, connect to WiFi network
-  if (wifiStationConfig.enabled && strlen(wifiStationConfig.ssid) > 0) {
-    debugPrintf("DEBUG: Connecting to WiFi: %s\n", wifiStationConfig.ssid);
-    WiFi.mode(WIFI_AP_STA);  // Set dual mode
-    WiFi.begin(wifiStationConfig.ssid, wifiStationConfig.password);
-    
-    // Don't wait for connection - it will happen in the background
-    // WiFi events will be handled by the event handler
-  } else {
-    WiFi.mode(WIFI_AP);  // AP mode only
-  }
-}
-
 void* createWiFiTestParam(const char* ssid, const char* password) {
   size_t ssidLen = strlen(ssid);
   size_t passLen = strlen(password);
@@ -323,4 +354,3 @@ void* createWiFiTestParam(const char* ssid, const char* password) {
   
   return param;
 }
-

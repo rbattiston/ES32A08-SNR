@@ -5,6 +5,7 @@
 #include "WiFiManager.h"
 #include "ModbusHandler.h"
 #include "Scheduler.h"
+#include "TimeManager.h" // Include TimeManager.h
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 
@@ -37,14 +38,13 @@ void initWebServer() {
   // Initialize MODBUS routes
   initModbusRoutes();
   
-  // Initialize Scheduler routes  // ADDED THIS LINE
-  initSchedulerRoutes();          // ADDED THIS LINE
+  // Initialize Scheduler routes
+  initSchedulerRoutes();
   
-  // Instead of calling the missing functions, implement their functionality directly
-  // or comment them out if not needed yet:
+  // Initialize Time routes (NEW)
+  initTimeRoutes();
   
   // WiFi routes
-  // WiFi API routes
   server.on("/api/wifi/status", HTTP_GET, handleGetWiFiStatus);
 
   server.on("/api/wifi/config", HTTP_POST, 
@@ -98,6 +98,22 @@ void initWebServer() {
   debugPrintln("DEBUG: Web server started");
 }
 
+// Initialize Time routes (NEW)
+void initTimeRoutes() {
+  debugPrintln("DEBUG: Initializing time routes...");
+  
+  // Time API endpoints
+  server.on("/api/time/status", HTTP_GET, handleGetTimeStatus);
+  
+  server.on("/api/time/timezone", HTTP_POST,
+    [](AsyncWebServerRequest *request) {},
+    NULL,
+    handleSetTimezone
+  );
+  
+  debugPrintln("DEBUG: Time routes initialized");
+}
+
 // Implement the IO routes here directly
 void initIORoutes() {
   // Route for IO status
@@ -139,7 +155,7 @@ void initModbusRoutes() {
   );
 }
 
-// Implement Scheduler routes  // ADDED THIS ENTIRE FUNCTION
+// Implement Scheduler routes
 void initSchedulerRoutes() {
   debugPrintln("DEBUG: Initializing scheduler routes...");
   

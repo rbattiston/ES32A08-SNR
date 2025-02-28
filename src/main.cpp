@@ -8,7 +8,7 @@
 #include <SPIFFS.h>
 #include "esp_task_wdt.h"
 #include "esp_system.h"
-#include "TimeManager.h"
+#include "TimeManager.h" // Make sure this includes the updated TimeManager.h
 
 void testSPIFFSWrite() {
   File testFile = SPIFFS.open("/test.txt", FILE_WRITE);
@@ -45,23 +45,31 @@ void setup() {
   }
   debugPrintln("DEBUG: SPIFFS initialized successfully");
   
-
   // List available files
   listSPIFFSFiles();
   testSPIFFSWrite();
-
   listSPIFFSFiles();
   
-  // Initialize managers
-  initIOManager();
+  // Initialize WiFi first to get AP up quickly
+  debugPrintln("DEBUG: Initializing WiFi Manager (AP mode first)...");
   initWiFiManager();
+  
+  // Then initialize other components
+  debugPrintln("DEBUG: Initializing IO Manager...");
+  initIOManager();
+  
   debugPrintln("DEBUG: Initializing Time Manager...");
   initTimeManager();
-  startTimeManagerTask(); // Optional: to continuously monitor time
+  startTimeManagerTask(); // This will monitor for WiFi connection before syncing
+  
+  debugPrintln("DEBUG: Initializing Scheduler...");
   initScheduler();
+  
+  debugPrintln("DEBUG: Initializing Modbus Handler...");
   initModbusHandler();
   
   // Initialize and start web server
+  debugPrintln("DEBUG: Initializing Web Server...");
   initWebServer();
   debugPrintln("DEBUG: Setup complete!");
   

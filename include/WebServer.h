@@ -16,6 +16,7 @@ void initWiFiRoutes();
 void initIORoutes();
 void initModbusRoutes();
 void initSchedulerRoutes();
+void initTimeRoutes();  // New function for time routes
 
 // API handlers for IO
 void handleGetIOStatus(AsyncWebServerRequest *request);

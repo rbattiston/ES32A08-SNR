@@ -39,7 +39,6 @@ function GMTToLocal(timeStr) {
 let scheduleDropdown, scheduleNameInput, relayMaskContainer, lightsOnInput, lightsOffInput;
 let eventList, timelineContainer;
 let addEventButton, saveScheduleButton, activateSchedulerButton, deactivateSchedulerButton, newScheduleButton;
-let timezoneDropdown, setTimezoneButton;
 
 // Initialize UI references
 function initUI() {
@@ -55,8 +54,6 @@ function initUI() {
   activateSchedulerButton = document.getElementById("activate-scheduler");
   deactivateSchedulerButton = document.getElementById("deactivate-scheduler");
   newScheduleButton = document.getElementById("new-schedule");
-  timezoneDropdown = document.getElementById("timezone-dropdown");
-  setTimezoneButton = document.getElementById("set-timezone");
 }
 
 // Populate schedule dropdown
@@ -306,19 +303,6 @@ function addEvent() {
   saveSchedule();
 }
 
-// Timezone selection: update the backend timezone (requires backend support)
-function setTimezone() {
-  let tz = timezoneDropdown.value;
-  fetch("/api/timezone/set", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ timezone: tz })
-  })
-  .then(response => response.json())
-  .then(data => alert("Timezone updated."))
-  .catch(err => console.error(err));
-}
-
 // Global variable for modal editing
 let currentEditingIndex = null;
 
@@ -369,8 +353,6 @@ document.addEventListener("DOMContentLoaded", function() {
     loadActiveSchedule();
     saveSchedule();
   });
-  
-  setTimezoneButton.addEventListener("click", setTimezone);
   
   document.getElementById("modal-save").addEventListener("click", saveEditModal);
   document.getElementById("modal-cancel").addEventListener("click", closeEditModal);

@@ -13,6 +13,9 @@ function debugPrintf(format, ...args) {
 // Elements – these will be assigned in createUIElements()
 let relayGrid, buttonGrid, inputGrid, currentInputs, voltageInputs, allOnButton, allOffButton;
 
+// Time elements (NEW)
+let currentTimeDisplay, firstSyncTimeDisplay, timezoneSelector, setTimezoneButton;
+
 // IO state
 let ioState = {
   relays: [],
@@ -25,6 +28,14 @@ let ioState = {
 // Create UI elements and assign global element variables
 function createUIElements() {
   debugPrintln("Creating UI elements...");
+  
+  // Time UI elements (NEW)
+  currentTimeDisplay = document.getElementById('current-time');
+  firstSyncTimeDisplay = document.getElementById('first-sync-time');
+  timezoneSelector = document.getElementById('timezone-selector');
+  setTimezoneButton = document.getElementById('set-timezone');
+  
+  // Original UI elements
   relayGrid = document.querySelector('.relay-grid');
   buttonGrid = document.querySelector('.button-grid');
   inputGrid = document.querySelector('.input-grid');
@@ -116,6 +127,83 @@ async function fetchIOStatus() {
   } catch (error) {
     debugPrintln("Error fetching IO status: " + error);
     console.error('Error fetching IO status:', error);
+  }
+}
+
+// Fetch time status from the API and update the time UI (NEW)
+async function fetchTimeStatus() {
+  try {
+    const response = await fetch('/api/time/status');
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+    const data = await response.json();
+    debugPrintf("Time Status received: %o", data);
+    updateTimeUI(data);
+  } catch (error) {
+    debugPrintln("Error fetching time status: " + error);
+    console.error('Error fetching time status:', error);
+  }
+}
+
+// Update Time UI with the received data (NEW)
+function updateTimeUI(data) {
+  if (currentTimeDisplay) {
+    currentTimeDisplay.textContent = data.currentTime || 'Unknown';
+  }
+  
+  if (firstSyncTimeDisplay) {
+    firstSyncTimeDisplay.textContent = data.firstSyncTime || 'Not synchronized yet';
+  }
+  
+  if (timezoneSelector && data.timezone) {
+    // Find and select the appropriate option
+    const options = timezoneSelector.options;
+    let found = false;
+    
+    for (let i = 0; i < options.length; i++) {
+      if (options[i].value === data.timezone) {
+        timezoneSelector.selectedIndex = i;
+        found = true;
+        break;
+      }
+    }
+    
+    // If not found in the dropdown, add a new option
+    if (!found) {
+      const option = document.createElement('option');
+      option.value = data.timezone;
+      option.textContent = `Custom (${data.timezone})`;
+      timezoneSelector.appendChild(option);
+      timezoneSelector.selectedIndex = timezoneSelector.options.length - 1;
+    }
+  }
+}
+
+// Set timezone via API (NEW)
+async function setTimezone(timezone) {
+  try {
+    const response = await fetch('/api/time/timezone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timezone: timezone })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    debugPrintln("Timezone set response: " + JSON.stringify(data));
+    
+    // Refresh time status
+    fetchTimeStatus();
+    
+    return data.status === 'success';
+  } catch (error) {
+    debugPrintln("Error setting timezone: " + error);
+    console.error('Error setting timezone:', error);
+    return false;
   }
 }
 
@@ -232,9 +320,11 @@ async function setAllRelays(states) {
   }
 }
 
-// Add event listeners for relay toggles and all-on/off buttons
+// Add event listeners for relay toggles, all-on/off buttons, and timezone (NEW)
 function addEventListeners() {
   debugPrintln("Adding event listeners...");
+  
+  // Relay controls event listeners
   if (relayGrid) {
     relayGrid.addEventListener('change', (event) => {
       if (event.target.classList.contains('relay-toggle')) {
@@ -259,6 +349,16 @@ function addEventListeners() {
       setAllRelays([false, false, false, false, false, false, false, false]);
     });
   }
+  
+  // Timezone button event listener (NEW)
+  if (setTimezoneButton && timezoneSelector) {
+    setTimezoneButton.addEventListener('click', () => {
+      const selectedTimezone = timezoneSelector.value;
+      debugPrintln(`Set timezone button clicked with timezone: ${selectedTimezone}`);
+      setTimezone(selectedTimezone);
+    });
+  }
+  
   debugPrintln("Event listeners added.");
 }
 
@@ -267,9 +367,16 @@ function initDashboard() {
   debugPrintln("Initializing dashboard...");
   createUIElements();
   addEventListeners();
+  
+  // Fetch initial status
   fetchIOStatus();
+  fetchTimeStatus();
+  
   // Update IO status every 500ms
   setInterval(fetchIOStatus, 500);
+  
+  // Update time status every 5 seconds
+  setInterval(fetchTimeStatus, 5000);
 }
 
 // Start dashboard initialization when DOM is ready

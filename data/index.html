@@ -19,6 +19,37 @@
     </header>
     
     <main>
+      <!-- Time and Timezone Section (NEW) -->
+      <section class="card" id="time-settings">
+        <h2>Time Settings</h2>
+        <div class="time-display">
+          <div class="time-row">
+            <div class="time-label">Current Time:</div>
+            <div class="time-value" id="current-time">Loading...</div>
+          </div>
+          <div class="time-row">
+            <div class="time-label">First Sync Time:</div>
+            <div class="time-value" id="first-sync-time">Not synchronized yet</div>
+          </div>
+          <div class="time-row">
+            <div class="time-label">Time Zone:</div>
+            <div class="time-value">
+              <select id="timezone-selector">
+                <option value="EST5EDT,M3.2.0/2,M11.1.0/2">Eastern Time (Toronto)</option>
+                <option value="CST6CDT,M3.2.0/2,M11.1.0/2">Central Time (Chicago)</option>
+                <option value="MST7MDT,M3.2.0/2,M11.1.0/2">Mountain Time (Denver)</option>
+                <option value="PST8PDT,M3.2.0/2,M11.1.0/2">Pacific Time (Los Angeles)</option>
+                <option value="UTC0">UTC</option>
+                <option value="GMT0BST,M3.5.0/1,M10.5.0">United Kingdom (London)</option>
+                <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central European Time</option>
+                <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Eastern Australia (Sydney)</option>
+              </select>
+              <button id="set-timezone">Apply Timezone</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      
       <section class="card" id="relay-controls">
         <h2>Relay Outputs</h2>
         <div class="relay-grid">
