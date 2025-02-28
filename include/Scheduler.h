@@ -5,43 +5,47 @@
 #include <ESPAsyncWebServer.h>
 
 #define SCHEDULER_FILE "/scheduler.json"
-#define MAX_EVENTS 20
+#define MAX_EVENTS 50
+#define MAX_SCHEDULES 8
 
-struct LightSchedule {
-  String lightsOnTime;
-  String lightsOffTime;
-};
-
+// Individual event: times are stored in GMT "HH:MM"
 struct Event {
   String id;
-  String time;           // Original HH:MM string from user
-  uint16_t startMinute;  // Computed minutes from midnight (derived from time)
-  uint16_t duration;     // in seconds
-  uint8_t relay;         // relay number (0–7)
-  uint8_t repeatCount;   // number of extra occurrences (0 means one occurrence)
-  uint16_t repeatInterval; // interval in minutes between occurrences
-  uint32_t executedMask; // transient: bitmask tracking which occurrences fired
+  String time;         // GMT "HH:MM"
+  uint16_t startMinute; // computed minutes from midnight (GMT)
+  uint16_t duration;   // seconds
+  uint32_t executedMask; // transient flag (unused now, as each event is independent)
 };
 
-struct SchedulerState {
-  LightSchedule lightSchedule;
+// A complete schedule for a 24‑hour period
+struct Schedule {
+  String name;         // Schedule name
+  String metadata;     // e.g., save date/time
+  uint8_t relayMask;   // bitmask for relays this schedule controls
+  String lightsOnTime; // GMT "HH:MM"
+  String lightsOffTime;// GMT "HH:MM"
   Event events[MAX_EVENTS];
   uint8_t eventCount;
 };
 
+// Global scheduler state
+struct SchedulerState {
+  Schedule schedules[MAX_SCHEDULES];
+  uint8_t scheduleCount;
+  uint8_t currentScheduleIndex; // Active schedule index
+};
+
 extern SchedulerState schedulerState;
 
-// Scheduler control functions
+// Function declarations
 void initScheduler();
 void startSchedulerTask();
 void stopSchedulerTask();
 void executeRelayCommand(uint8_t relay, uint16_t duration);
-
-// Persistence functions
 void loadSchedulerState();
 void saveSchedulerState();
 
-// API handlers
+// API handlers…
 void handleLoadSchedulerState(AsyncWebServerRequest *request);
 void handleSchedulerStatus(AsyncWebServerRequest *request);
 void handleActivateScheduler(AsyncWebServerRequest *request);

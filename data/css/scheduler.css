@@ -94,6 +94,7 @@ button:hover {
   background-color: #fafafa;
   padding: 10px;
   margin-top: 20px;
+  height: 200px;
 }
 .timeline-relay {
   margin-bottom: 15px;
@@ -108,6 +109,7 @@ button:hover {
   overflow: hidden;
   border: 1px solid #ddd;
   background-color: #f8f8f8;
+  margin-bottom: 10px;
 }
 .timeline-bar {
   position: relative;
@@ -144,6 +146,16 @@ button:hover {
   width: 2px;
   background-color: red;
   z-index: 10;
+}
+
+/* Background for lights on/off */
+.timeline-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
 }
 
 /* Modal Styles */

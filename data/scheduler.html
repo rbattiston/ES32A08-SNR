@@ -19,46 +19,57 @@
       </nav>
     </header>
     <main>
-      <!-- Light Schedule Section -->
-      <section id="light-schedule">
-        <h2>Light Schedule (Informational)</h2>
+      <!-- Schedule Selection -->
+      <section id="schedule-selection">
+        <h2>Select Schedule</h2>
+        <select id="schedule-dropdown"></select>
+        <button id="new-schedule">New Schedule</button>
+      </section>
+      
+      <!-- Schedule Settings -->
+      <section id="schedule-settings">
+        <h2>Schedule Settings</h2>
         <div class="form-group">
-          <label for="lights-on-time">Lights On Time</label>
+          <label for="schedule-name">Schedule Name</label>
+          <input type="text" id="schedule-name" placeholder="Enter schedule name">
+        </div>
+        <div class="form-group">
+          <label for="lights-on-time">Lights On Time (Local)</label>
           <input type="time" id="lights-on-time" value="06:00">
         </div>
         <div class="form-group">
-          <label for="lights-off-time">Lights Off Time</label>
+          <label for="lights-off-time">Lights Off Time (Local)</label>
           <input type="time" id="lights-off-time" value="18:00">
         </div>
+        <div class="form-group">
+          <label>Relay Mask</label>
+          <div id="relay-mask">
+            <label><input type="checkbox" data-relay="0"> Relay 1</label>
+            <label><input type="checkbox" data-relay="1"> Relay 2</label>
+            <label><input type="checkbox" data-relay="2"> Relay 3</label>
+            <label><input type="checkbox" data-relay="3"> Relay 4</label>
+            <label><input type="checkbox" data-relay="4"> Relay 5</label>
+            <label><input type="checkbox" data-relay="5"> Relay 6</label>
+            <label><input type="checkbox" data-relay="6"> Relay 7</label>
+            <label><input type="checkbox" data-relay="7"> Relay 8</label>
+          </div>
+        </div>
       </section>
-
+      
       <!-- Events Section -->
       <section id="events">
         <h2>Scheduled Events</h2>
         <div id="event-list">
-          <!-- Existing events will be rendered here -->
+          <!-- Event list for active schedule -->
         </div>
         <h3>Add New Event</h3>
         <div class="form-group">
-          <label for="event-time">Start Time</label>
+          <label for="event-time">Start Time (Local)</label>
           <input type="time" id="event-time" value="12:00">
         </div>
         <div class="form-group">
           <label for="event-duration">Duration (seconds)</label>
           <input type="number" id="event-duration" min="1" max="600" value="30">
-        </div>
-        <div class="form-group">
-          <label for="event-relay">Relay</label>
-          <select id="event-relay">
-            <option value="0">Relay 1</option>
-            <option value="1">Relay 2</option>
-            <option value="2">Relay 3</option>
-            <option value="3">Relay 4</option>
-            <option value="4">Relay 5</option>
-            <option value="5">Relay 6</option>
-            <option value="6">Relay 7</option>
-            <option value="7">Relay 8</option>
-          </select>
         </div>
         <div class="form-group">
           <label for="event-repeat">Repeat Count</label>
@@ -70,25 +81,36 @@
         </div>
         <button id="add-event">Add Event</button>
       </section>
-
-      <!-- Schedule Visualization Section -->
+      
+      <!-- Timeline Visualization -->
       <section id="schedule-visualization">
         <h2>Schedule Visualization</h2>
         <div id="timeline-container">
-          <!-- For each relay, a timeline bar will be generated -->
+          <!-- A single timeline bar will be drawn here -->
         </div>
       </section>
-
+      
       <!-- Scheduler Controls -->
       <section id="scheduler-controls">
         <h2>Scheduler Controls</h2>
-        <button id="save-scheduler">Save Scheduler</button>
+        <button id="save-schedule">Save Schedule</button>
         <button id="activate-scheduler">Activate Scheduler</button>
         <button id="deactivate-scheduler">Deactivate Scheduler</button>
       </section>
+      
+      <!-- Time Zone Selection -->
+      <section id="timezone-selection">
+        <h2>Set Local Time Zone</h2>
+        <select id="timezone-dropdown">
+          <option value="EST5EDT,M3.2.0/2,M11.1.0/2">Eastern Time (Toronto)</option>
+          <option value="UTC0">UTC</option>
+          <!-- Additional time zones can be added -->
+        </select>
+        <button id="set-timezone">Set Time Zone</button>
+      </section>
     </main>
   </div>
-
+  
   <!-- Modal for Editing an Event -->
   <div id="edit-modal" class="modal">
     <div class="modal-content">
@@ -106,14 +128,6 @@
           <label for="edit-duration">Duration (seconds)</label>
           <input type="number" id="edit-duration" min="1" max="600">
         </div>
-        <div class="form-group">
-          <label for="edit-repeat">Repeat Count</label>
-          <input type="number" id="edit-repeat" min="0" max="20">
-        </div>
-        <div class="form-group">
-          <label for="edit-repeat-interval">Repeat Interval (minutes)</label>
-          <input type="number" id="edit-repeat-interval" min="1" max="1440">
-        </div>
         <div class="modal-controls">
           <button type="button" id="modal-save">Save</button>
           <button type="button" id="modal-cancel">Cancel</button>
@@ -121,7 +135,7 @@
       </form>
     </div>
   </div>
-
+  
   <script src="js/scheduler.js"></script>
 </body>
 </html>

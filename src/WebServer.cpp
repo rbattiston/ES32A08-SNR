@@ -145,7 +145,7 @@ void initSchedulerRoutes() {
   
   // Scheduler API endpoints
   server.on("/api/scheduler/save", HTTP_POST,
-    // Empty onRequest lambda (required for onBody to work)
+    // onRequest handler (empty)
     [](AsyncWebServerRequest *request) {},
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
@@ -156,41 +156,44 @@ void initSchedulerRoutes() {
         return;
       }
       
-      // Update light schedule if provided
-      if (doc.containsKey("lightSchedule")) {
-        JsonObject ls = doc["lightSchedule"];
-        schedulerState.lightSchedule.lightsOnTime = ls["lightsOnTime"].as<String>();
-        schedulerState.lightSchedule.lightsOffTime = ls["lightsOffTime"].as<String>();
-      }
+      // Update the global schedulerState from the JSON payload
+      schedulerState.scheduleCount = doc["scheduleCount"] | 0;
+      schedulerState.currentScheduleIndex = doc["currentScheduleIndex"] | 0;
       
-      // Update events if provided
-      if (doc.containsKey("events")) {
-        JsonArray events = doc["events"].as<JsonArray>();
-        schedulerState.eventCount = 0;
-        for (JsonObject evt : events) {
-          if (schedulerState.eventCount < MAX_EVENTS) {
-            Event &e = schedulerState.events[schedulerState.eventCount];
-            e.id = evt["id"].as<String>();
-            e.time = evt["time"].as<String>();
-            int hour = 0, minute = 0;
-            sscanf(e.time.c_str(), "%d:%d", &hour, &minute);
-            e.startMinute = hour * 60 + minute;
-            e.duration = evt["duration"].as<uint16_t>();
-            e.relay = evt["relay"].as<uint8_t>();
-            e.repeatCount = evt["repeatCount"].as<uint8_t>();  // Use repeatCount here
-            e.repeatInterval = evt["repeatInterval"].as<uint16_t>();
-            e.executedMask = 0;
-            schedulerState.eventCount++;
+      JsonArray schedules = doc["schedules"].as<JsonArray>();
+      schedulerState.scheduleCount = 0; // reset count for reloading
+      for (JsonObject schObj : schedules) {
+        if (schedulerState.scheduleCount < MAX_SCHEDULES) {
+          Schedule &sch = schedulerState.schedules[schedulerState.scheduleCount];
+          sch.name = schObj["name"].as<String>();
+          sch.metadata = schObj["metadata"].as<String>();
+          sch.relayMask = schObj["relayMask"].as<uint8_t>();
+          JsonArray events = schObj["events"].as<JsonArray>();
+          sch.eventCount = 0;
+          for (JsonObject evt : events) {
+            if (sch.eventCount < MAX_EVENTS) {
+              Event &e = sch.events[sch.eventCount];
+              e.id = evt["id"].as<String>();
+              e.time = evt["time"].as<String>();  // Time stored in GMT
+              int hour = 0, minute = 0;
+              sscanf(e.time.c_str(), "%d:%d", &hour, &minute);
+              e.startMinute = hour * 60 + minute;
+              e.duration = evt["duration"].as<uint16_t>();
+              e.executedMask = 0;
+              sch.eventCount++;
+            }
           }
+          schedulerState.scheduleCount++;
         }
       }
       
-      // Now save the updated state to SPIFFS
+      // Now save the updated state to SPIFFS.
       saveSchedulerState();
       debugPrintln("DEBUG: /api/scheduler/save called, state saved to SPIFFS");
       request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler state saved to SPIFFS\"}");
     }
   );
+  
   
   server.on("/api/scheduler/load", HTTP_GET, handleLoadSchedulerState);
   
