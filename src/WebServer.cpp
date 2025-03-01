@@ -137,9 +137,9 @@ void initWebServer() {
     request->send(SPIFFS, "/css/scheduler.css", "text/css");
   });
   
-  server.on("/js/scheduler.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    debugPrintln("DEBUG: Serving scheduler.js");
-    request->send(SPIFFS, "/js/scheduler.js", "text/javascript");
+  server.on("/js/scheduler-bundle.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    debugPrintln("DEBUG: Serving scheduler-bundle.js");
+    request->send(SPIFFS, "/js/scheduler-bundle.js", "text/javascript");
   });
   
   // Add a not found handler
@@ -231,8 +231,8 @@ void initSchedulerRoutes() {
   
   // Serve scheduler JavaScript
   server.on("/js/scheduler-bundle.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    debugPrintln("DEBUG: Serving scheduler.js");
-    request->send(SPIFFS, "/js/scheduler.js", "text/javascript");
+    debugPrintln("DEBUG: Serving scheduler-bundle.js");
+    request->send(SPIFFS, "/js/scheduler-bundle.js", "text/javascript");
   });
   
   // API endpoint to load scheduler state
