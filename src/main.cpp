@@ -167,7 +167,7 @@ void setup() {
     NULL,
     1,
     NULL,
-    0 // Run on core 0
+    1 // Run on core 1
   );
   
   // Create watchdog task
@@ -188,7 +188,7 @@ void setup() {
     NULL,
     1,
     &wifiMonitorTaskHandle,
-    0 // Run on core 0
+    1 // Run on core 1
   );
   
   debugPrintln("-------------------------");

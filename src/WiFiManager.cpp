@@ -126,7 +126,7 @@ void initWiFiManager() {
     NULL,
     1,     // Priority
     NULL,
-    0      // Run on core 0
+    1      // Run on core 0
   );
   
   debugPrintln("DEBUG: WiFi manager initialized");
@@ -472,6 +472,6 @@ void handleTestWiFiConnection(AsyncWebServerRequest *request, uint8_t *data, siz
     createWiFiTestParam(ssid, password), // Create a parameter block
     1,
     NULL,
-    0
+    1
   );
 }
