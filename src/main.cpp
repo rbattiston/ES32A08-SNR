@@ -8,7 +8,8 @@
 #include <SPIFFS.h>
 #include "esp_task_wdt.h"
 #include "esp_system.h"
-#include "TimeManager.h" // Make sure this includes the updated TimeManager.h
+#include "TimeManager.h"
+#include "MemoryManager.h" // Add the new memory management header
 
 // Add these variables for WiFi monitoring
 TaskHandle_t wifiMonitorTaskHandle = NULL;
@@ -147,6 +148,12 @@ void setup() {
   debugPrintln("DEBUG: Initializing Modbus Handler...");
   initModbusHandler();
   
+  // Initialize Memory Management
+  initMemoryManager();
+  
+  // Reduce memory usage after setup
+  performMemoryOptimization();
+  
   // Initialize and start web server
   debugPrintln("DEBUG: Initializing Web Server...");
   initWebServer();
@@ -184,9 +191,6 @@ void setup() {
     0 // Run on core 0
   );
   
-  // Reduce memory usage after setup
-  heap_caps_trim_memory();
-  
   debugPrintln("-------------------------");
   debugPrintf("Connect to WiFi SSID: %s with password: %s\n", getAPSSID(), getAPPassword());
   debugPrintf("Then navigate to http://%s in your browser\n", WiFi.softAPIP().toString().c_str());
@@ -196,8 +200,14 @@ void setup() {
 void loop() {
   // Main loop only handles heartbeat and housekeeping
   static uint32_t heartbeatTime = 0;
-  if (millis() - heartbeatTime > 10000) {
-    heartbeatTime = millis();
+  static uint32_t lastMemoryOptimizationTime = 0;
+  static uint32_t lastIntegrityCheckTime = 0;
+  
+  uint32_t currentTime = millis();
+  
+  // Heartbeat and logging every 10 seconds
+  if (currentTime - heartbeatTime > 10000) {
+    heartbeatTime = currentTime;
     
     switchToDebugMode();
     debugPrintln("DEBUG: Heartbeat - ESP32 still running");
@@ -214,6 +224,18 @@ void loop() {
                  currentWiFiStatus ? "CONNECTED" : "DISCONNECTED");
       lastWiFiStatus = currentWiFiStatus;
     }
+  }
+  
+  // Perform memory optimization periodically (every minute)
+  if (currentTime - lastMemoryOptimizationTime > 60000) {
+    lastMemoryOptimizationTime = currentTime;
+    performMemoryOptimization();
+  }
+  
+  // Perform heap integrity check periodically (every 5 minutes)
+  if (currentTime - lastIntegrityCheckTime > 300000) {
+    lastIntegrityCheckTime = currentTime;
+    checkHeapIntegrity();
   }
   
   // Efficient delay that allows other tasks to run

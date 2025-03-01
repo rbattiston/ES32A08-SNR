@@ -3,6 +3,8 @@
 #include "Utils.h"
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#include "esp_wifi.h"
+#include "esp_netif.h"
 
 // WiFi settings
 const char* AP_SSID = "ES32A08-Setup"; // Default AP SSID
@@ -83,8 +85,10 @@ void initWiFiManager() {
   // Set WiFi power output to maximum
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
   
-  // Disable power saving mode to improve stability
-  esp_wifi_set_ps(WIFI_PS_NONE);
+  // Optional: Wrap in a conditional compilation block
+  #ifdef ESP_IDF_VERSION_MAJOR
+    esp_wifi_set_ps(WIFI_PS_NONE);
+  #endif
   
   // Set WiFi event handler
   WiFi.onEvent(WiFiEventHandler);
