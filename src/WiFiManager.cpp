@@ -13,11 +13,78 @@ WiFiConfig wifiStationConfig;
 volatile bool wifiTestInProgress = false;
 bool stationConnected = false;
 
+// Helper function to check WiFi connection status
+bool isWiFiConnected() {
+  return WiFi.status() == WL_CONNECTED;
+}
+
+// WiFi reconnection task
+void wifiReconnectTask(void *pvParameters) {
+  const int CHECK_INTERVAL_MS = 10000; // Check every 10 seconds
+  const int MAX_RECONNECT_ATTEMPTS = 3;
+  int reconnectAttempts = 0;
+  
+  debugPrintln("DEBUG: WiFi reconnect task started");
+  
+  for (;;) {
+    // Only attempt reconnection if:
+    // 1. WiFi station mode is enabled
+    // 2. We're not connected
+    // 3. We have valid credentials
+    if (wifiStationConfig.enabled && 
+        WiFi.status() != WL_CONNECTED && 
+        strlen(wifiStationConfig.ssid) > 0) {
+      
+      // Limit consecutive reconnect attempts
+      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttempts++;
+        debugPrintf("DEBUG: WiFi reconnect attempt %d of %d...\n", 
+                   reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
+        
+        // Try to reconnect
+        WiFi.disconnect();
+        delay(500); // Short delay to ensure disconnect is complete
+        WiFi.begin(wifiStationConfig.ssid, wifiStationConfig.password);
+        
+        // Wait a bit to see if we connect
+        for (int i = 0; i < 10; i++) {
+          if (WiFi.status() == WL_CONNECTED) {
+            debugPrintln("DEBUG: WiFi reconnected successfully!");
+            reconnectAttempts = 0; // Reset counter on success
+            break;
+          }
+          delay(500);
+        }
+      } else {
+        // Too many failed attempts, wait longer before trying again
+        debugPrintln("DEBUG: WiFi reconnect attempts exceeded. Waiting before retrying...");
+        reconnectAttempts = 0;
+        vTaskDelay(pdMS_TO_TICKS(60000)); // Wait 60 seconds before retrying
+        continue;
+      }
+    } else {
+      // If we're connected, reset the counter
+      if (WiFi.status() == WL_CONNECTED) {
+        reconnectAttempts = 0;
+      }
+    }
+    
+    // Regular interval between checks
+    vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
+  }
+}
+
 void initWiFiManager() {
   debugPrintln("DEBUG: Initializing WiFi manager...");
   
   // Load WiFi configuration first
   loadWiFiConfig();
+  
+  // Set WiFi power output to maximum
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  
+  // Disable power saving mode to improve stability
+  esp_wifi_set_ps(WIFI_PS_NONE);
   
   // Set WiFi event handler
   WiFi.onEvent(WiFiEventHandler);
@@ -36,7 +103,7 @@ void initWiFiManager() {
   delay(100);
   
   IPAddress apIP = WiFi.softAPIP();
-  debugPrintln("DEBUG: AP Mode IP Address: ");
+  debugPrint("DEBUG: AP Mode IP Address: ");
   debugPrintln(apIP.toString().c_str());
   
   // If STA mode is enabled, connect to WiFi network after AP is ready
@@ -46,6 +113,17 @@ void initWiFiManager() {
     WiFi.begin(wifiStationConfig.ssid, wifiStationConfig.password);
     // Connection will be handled asynchronously by the event handler
   }
+  
+  // Start the WiFi reconnect task to maintain connectivity
+  xTaskCreatePinnedToCore(
+    wifiReconnectTask,
+    "WiFiReconnect",
+    4096,  // Stack size
+    NULL,
+    1,     // Priority
+    NULL,
+    0      // Run on core 0
+  );
   
   debugPrintln("DEBUG: WiFi manager initialized");
 }
@@ -59,15 +137,18 @@ const char* getAPPassword() {
 }
 
 void WiFiEventHandler(WiFiEvent_t event) {
-  // Declare variables outside the switch statement to avoid jump errors
   struct tm timeinfo;
   char timeStr[64];
   int retry;
   
   switch (event) {
+    case SYSTEM_EVENT_STA_START:
+      debugPrintln("DEBUG: WiFi station mode started");
+      break;
+      
     case SYSTEM_EVENT_STA_GOT_IP:
-      debugPrintln("DEBUG: WiFi connected! IP address: ");
-      debugPrintln(WiFi.localIP().toString().c_str());
+      debugPrintf("DEBUG: WiFi connected! IP address: %s\n", WiFi.localIP().toString().c_str());
+      debugPrintf("DEBUG: Signal strength (RSSI): %d dBm\n", WiFi.RSSI());
       stationConnected = true;
       
       // Now that we have Internet, sync time with NTP
@@ -93,9 +174,24 @@ void WiFiEventHandler(WiFiEvent_t event) {
     case SYSTEM_EVENT_STA_DISCONNECTED:
       debugPrintln("DEBUG: WiFi lost connection");
       stationConnected = false;
+      // Don't try to reconnect here - let the dedicated task handle it
+      break;
+      
+    case SYSTEM_EVENT_STA_STOP:
+      debugPrintln("DEBUG: WiFi station mode stopped");
+      stationConnected = false;
+      break;
+      
+    case SYSTEM_EVENT_AP_STACONNECTED:
+      debugPrintln("DEBUG: Device connected to AP");
+      break;
+      
+    case SYSTEM_EVENT_AP_STADISCONNECTED:
+      debugPrintln("DEBUG: Device disconnected from AP");
       break;
       
     default:
+      debugPrintf("DEBUG: Unhandled WiFi event: %d\n", event);
       break;
   }
 }
@@ -106,8 +202,92 @@ void setupDualWiFi() {
   initWiFiManager();
 }
 
-// The remaining functions are unchanged
-// ...
+void saveWiFiConfig() {
+  File file = SPIFFS.open("/wifi_config.json", FILE_WRITE);
+  if (!file) {
+    debugPrintln("DEBUG: Failed to open WiFi config file for writing");
+    return;
+  }
+  
+  DynamicJsonDocument doc(256);
+  doc["ssid"] = wifiStationConfig.ssid;
+  doc["password"] = wifiStationConfig.password;
+  doc["enabled"] = wifiStationConfig.enabled;
+  
+  if (serializeJson(doc, file) == 0) {
+    debugPrintln("DEBUG: Failed to write WiFi config to file");
+  }
+  
+  file.close();
+}
+
+void loadWiFiConfig() {
+  // Initialize with defaults first
+  strcpy(wifiStationConfig.ssid, "");
+  strcpy(wifiStationConfig.password, "");
+  wifiStationConfig.enabled = false;
+  
+  if (!SPIFFS.exists("/wifi_config.json")) {
+    debugPrintln("DEBUG: WiFi config file not found, using defaults");
+    saveWiFiConfig(); // Create default config file
+    return;
+  }
+  
+  File file = SPIFFS.open("/wifi_config.json", FILE_READ);
+  if (!file) {
+    debugPrintln("DEBUG: Failed to open WiFi config file for reading");
+    return;
+  }
+  
+  // Check file size to avoid buffer issues
+  size_t fileSize = file.size();
+  if (fileSize == 0 || fileSize > 1024) {
+    debugPrintln("DEBUG: WiFi config file is empty or too large");
+    file.close();
+    return;
+  }
+  
+  // Read the file content
+  String jsonContent = file.readString();
+  file.close();
+  
+  DynamicJsonDocument doc(512); // Use larger buffer for safety
+  DeserializationError error = deserializeJson(doc, jsonContent);
+  
+  if (error) {
+    debugPrintf("DEBUG: Failed to parse WiFi config JSON: %s\n", error.c_str());
+    return;
+  }
+
+  // WiFi Station Credentials with stricter validation
+  if (doc.containsKey("ssid") && doc["ssid"].is<const char*>()) {
+    strlcpy(wifiStationConfig.ssid, doc["ssid"] | "", sizeof(wifiStationConfig.ssid));
+  }
+  
+  if (doc.containsKey("password") && doc["password"].is<const char*>()) {
+    strlcpy(wifiStationConfig.password, doc["password"] | "", sizeof(wifiStationConfig.password));
+  }
+  
+  wifiStationConfig.enabled = doc["enabled"] | false;
+  
+  debugPrintf("DEBUG: Loaded WiFi config: SSID='%s', enabled=%d\n", 
+             wifiStationConfig.ssid, wifiStationConfig.enabled);
+}
+
+void* createWiFiTestParam(const char* ssid, const char* password) {
+  size_t ssidLen = strlen(ssid);
+  size_t passLen = strlen(password);
+  char* param = (char*)malloc(ssidLen + passLen + 2); // +2 for null terminators
+  
+  if (param) {
+    strcpy(param, ssid);
+    strcpy(param + ssidLen + 1, password);
+  }
+  
+  return param;
+}
+
+// API Handlers
 void handleGetWiFiStatus(AsyncWebServerRequest *request) {
   debugPrintln("DEBUG: API request received: /api/wifi/status");
   
@@ -290,67 +470,4 @@ void handleTestWiFiConnection(AsyncWebServerRequest *request, uint8_t *data, siz
     NULL,
     0
   );
-}
-
-void saveWiFiConfig() {
-  File file = SPIFFS.open("/wifi_config.json", FILE_WRITE);
-  if (!file) {
-    debugPrintln("DEBUG: Failed to open WiFi config file for writing");
-    return;
-  }
-  
-  DynamicJsonDocument doc(256);
-  doc["ssid"] = wifiStationConfig.ssid;
-  doc["password"] = wifiStationConfig.password;
-  doc["enabled"] = wifiStationConfig.enabled;
-  
-  if (serializeJson(doc, file) == 0) {
-    debugPrintln("DEBUG: Failed to write WiFi config to file");
-  }
-  
-  file.close();
-}
-
-void loadWiFiConfig() {
-  if (!SPIFFS.exists("/wifi_config.json")) {
-    debugPrintln("DEBUG: WiFi config file not found, using defaults");
-    strcpy(wifiStationConfig.ssid, "");
-    strcpy(wifiStationConfig.password, "");
-    wifiStationConfig.enabled = false;
-    saveWiFiConfig();
-    return;
-  }
-  
-  File file = SPIFFS.open("/wifi_config.json", FILE_READ);
-  if (!file) {
-    debugPrintln("DEBUG: Failed to open WiFi config file for reading");
-    return;
-  }
-  
-  DynamicJsonDocument doc(256);
-  DeserializationError error = deserializeJson(doc, file);
-  file.close();
-  
-  if (error) {
-    debugPrintf("DEBUG: Failed to parse WiFi config JSON: %s\n", error.c_str());
-    return;
-  }
-
-  // Wifi Station Credentials ssid/password
-  strlcpy(wifiStationConfig.ssid, doc["ssid"] | "", sizeof(wifiStationConfig.ssid));
-  strlcpy(wifiStationConfig.password, doc["password"] | "", sizeof(wifiStationConfig.password));
-  wifiStationConfig.enabled = doc["enabled"] | false;
-}
-
-void* createWiFiTestParam(const char* ssid, const char* password) {
-  size_t ssidLen = strlen(ssid);
-  size_t passLen = strlen(password);
-  char* param = (char*)malloc(ssidLen + passLen + 2); // +2 for null terminators
-  
-  if (param) {
-    strcpy(param, ssid);
-    strcpy(param + ssidLen + 1, password);
-  }
-  
-  return param;
 }
