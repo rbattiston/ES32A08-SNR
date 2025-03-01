@@ -12,6 +12,60 @@
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
+// Initialize Filesystem routes
+void initFilesystemRoutes() {
+  debugPrintln("DEBUG: Initializing filesystem routes...");
+  
+  // Filesystem API endpoint
+  server.on("/api/fs/info", HTTP_GET, handleGetFilesystemInfo);
+  
+  debugPrintln("DEBUG: Filesystem routes initialized");
+}
+
+// API handler for getting filesystem info
+void handleGetFilesystemInfo(AsyncWebServerRequest *request) {
+  debugPrintln("DEBUG: API request received: /api/fs/info");
+  
+  DynamicJsonDocument doc(4096); // Make it large enough for file listing
+  
+  // Get SPIFFS info
+  size_t totalBytes = SPIFFS.totalBytes();
+  size_t usedBytes = SPIFFS.usedBytes();
+  size_t freeBytes = totalBytes - usedBytes;
+  
+  doc["totalBytes"] = totalBytes;
+  doc["usedBytes"] = usedBytes;
+  doc["freeBytes"] = freeBytes;
+  
+  // Get file listing
+  File root = SPIFFS.open("/");
+  if (root && root.isDirectory()) {
+    JsonArray files = doc.createNestedArray("files");
+    int fileCount = 0;
+    
+    File file = root.openNextFile();
+    while (file) {
+      JsonObject fileObj = files.createNestedObject();
+      fileObj["name"] = String(file.name());
+      fileObj["size"] = file.size();
+      fileCount++;
+      
+      file = root.openNextFile();
+    }
+    
+    doc["fileCount"] = fileCount;
+  } else {
+    doc["fileCount"] = 0;
+    doc["files"] = JsonArray();
+  }
+  
+  String response;
+  serializeJson(doc, response);
+  
+  request->send(200, "application/json", response);
+  debugPrintln("DEBUG: Filesystem info sent to client");
+}
+
 void initWebServer() {
   debugPrintln("DEBUG: Initializing web server...");
   
@@ -41,8 +95,11 @@ void initWebServer() {
   // Initialize Scheduler routes
   initSchedulerRoutes();
   
-  // Initialize Time routes (NEW)
+  // Initialize Time routes
   initTimeRoutes();
+  
+  // Initialize Filesystem routes
+  initFilesystemRoutes();
   
   // WiFi routes
   server.on("/api/wifi/status", HTTP_GET, handleGetWiFiStatus);
@@ -80,7 +137,7 @@ void initWebServer() {
     request->send(SPIFFS, "/css/scheduler.css", "text/css");
   });
   
-  server.on("/js/scheduler-bundle.js", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/js/scheduler.js", HTTP_GET, [](AsyncWebServerRequest *request){
     debugPrintln("DEBUG: Serving scheduler.js");
     request->send(SPIFFS, "/js/scheduler.js", "text/javascript");
   });

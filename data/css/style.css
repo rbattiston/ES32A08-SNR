@@ -537,3 +537,77 @@ color: var(--primary-color);
 .form-group {
 position: relative;
 }
+
+/* Add these styles to your existing style.css file */
+
+/* Filesystem Information Styles */
+.filesystem-display {
+  margin-bottom: 20px;
+}
+
+.info-row {
+  display: flex;
+  margin-bottom: 10px;
+  align-items: center;
+}
+
+.info-label {
+  width: 120px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.info-value {
+  flex-grow: 1;
+}
+
+#file-list-container {
+  margin-top: 15px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 15px;
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+#file-list-container h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.file-item-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.file-item {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.file-item:last-child {
+  border-bottom: none;
+}
+
+.file-item:hover {
+  background-color: rgba(0, 123, 255, 0.05);
+}
+
+.file-name {
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 10px;
+}
+
+.file-size {
+  color: var(--secondary-color);
+  font-size: 0.9em;
+  white-space: nowrap;
+}

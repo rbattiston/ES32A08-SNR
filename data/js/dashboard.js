@@ -13,8 +13,11 @@ function debugPrintf(format, ...args) {
 // Elements – these will be assigned in createUIElements()
 let relayGrid, buttonGrid, inputGrid, currentInputs, voltageInputs, allOnButton, allOffButton;
 
-// Time elements (NEW)
+// Time elements
 let currentTimeDisplay, firstSyncTimeDisplay, timezoneSelector, setTimezoneButton;
+
+// Filesystem elements
+let totalSpaceDisplay, usedSpaceDisplay, freeSpaceDisplay, fileCountDisplay, fileListDisplay, refreshFsButton;
 
 // IO state
 let ioState = {
@@ -29,11 +32,19 @@ let ioState = {
 function createUIElements() {
   debugPrintln("Creating UI elements...");
   
-  // Time UI elements (NEW)
+  // Time UI elements
   currentTimeDisplay = document.getElementById('current-time');
   firstSyncTimeDisplay = document.getElementById('first-sync-time');
   timezoneSelector = document.getElementById('timezone-selector');
   setTimezoneButton = document.getElementById('set-timezone');
+  
+  // Filesystem UI elements
+  totalSpaceDisplay = document.getElementById('total-space');
+  usedSpaceDisplay = document.getElementById('used-space');
+  freeSpaceDisplay = document.getElementById('free-space');
+  fileCountDisplay = document.getElementById('file-count');
+  fileListDisplay = document.getElementById('file-list');
+  refreshFsButton = document.getElementById('refresh-fs-info');
   
   // Original UI elements
   relayGrid = document.querySelector('.relay-grid');
@@ -130,7 +141,7 @@ async function fetchIOStatus() {
   }
 }
 
-// Fetch time status from the API and update the time UI (NEW)
+// Fetch time status from the API and update the time UI
 async function fetchTimeStatus() {
   try {
     const response = await fetch('/api/time/status');
@@ -146,7 +157,74 @@ async function fetchTimeStatus() {
   }
 }
 
-// Update Time UI with the received data (NEW)
+// Fetch filesystem information and update the UI
+async function fetchFilesystemInfo() {
+  try {
+    const response = await fetch('/api/fs/info');
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+    const data = await response.json();
+    debugPrintf("Filesystem info received: %o", data);
+    updateFilesystemUI(data);
+  } catch (error) {
+    debugPrintln("Error fetching filesystem info: " + error);
+    console.error('Error fetching filesystem info:', error);
+    
+    // Show error in UI
+    if (totalSpaceDisplay) totalSpaceDisplay.textContent = 'Error fetching data';
+    if (usedSpaceDisplay) usedSpaceDisplay.textContent = 'Error fetching data';
+    if (freeSpaceDisplay) freeSpaceDisplay.textContent = 'Error fetching data';
+    if (fileCountDisplay) fileCountDisplay.textContent = 'Error fetching data';
+    if (fileListDisplay) fileListDisplay.innerHTML = '<p>Error fetching file list</p>';
+  }
+}
+
+// Update Filesystem UI with the received data
+function updateFilesystemUI(data) {
+  if (!data) return;
+  
+  // Format numbers with commas and appropriate units
+  const formatBytes = (bytes) => {
+    if (bytes < 1024) return bytes + ' bytes';
+    else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+    else return (bytes / 1048576).toFixed(2) + ' MB';
+  };
+  
+  if (totalSpaceDisplay) {
+    totalSpaceDisplay.textContent = formatBytes(data.totalBytes);
+  }
+  
+  if (usedSpaceDisplay) {
+    usedSpaceDisplay.textContent = formatBytes(data.usedBytes);
+  }
+  
+  if (freeSpaceDisplay) {
+    freeSpaceDisplay.textContent = formatBytes(data.freeBytes);
+  }
+  
+  if (fileCountDisplay) {
+    fileCountDisplay.textContent = data.fileCount + ' files';
+  }
+  
+  if (fileListDisplay) {
+    if (data.files && data.files.length > 0) {
+      let fileListHTML = '<ul class="file-item-list">';
+      data.files.forEach(file => {
+        fileListHTML += `<li class="file-item">
+          <span class="file-name">${file.name}</span>
+          <span class="file-size">${formatBytes(file.size)}</span>
+        </li>`;
+      });
+      fileListHTML += '</ul>';
+      fileListDisplay.innerHTML = fileListHTML;
+    } else {
+      fileListDisplay.innerHTML = '<p>No files found</p>';
+    }
+  }
+}
+
+// Update Time UI with the received data
 function updateTimeUI(data) {
   if (currentTimeDisplay) {
     currentTimeDisplay.textContent = data.currentTime || 'Unknown';
@@ -180,7 +258,7 @@ function updateTimeUI(data) {
   }
 }
 
-// Set timezone via API (NEW)
+// Set timezone via API
 async function setTimezone(timezone) {
   try {
     const response = await fetch('/api/time/timezone', {
@@ -320,7 +398,7 @@ async function setAllRelays(states) {
   }
 }
 
-// Add event listeners for relay toggles, all-on/off buttons, and timezone (NEW)
+// Add event listeners for relay toggles, all-on/off buttons, and timezone
 function addEventListeners() {
   debugPrintln("Adding event listeners...");
   
@@ -350,12 +428,20 @@ function addEventListeners() {
     });
   }
   
-  // Timezone button event listener (NEW)
+  // Timezone button event listener
   if (setTimezoneButton && timezoneSelector) {
     setTimezoneButton.addEventListener('click', () => {
       const selectedTimezone = timezoneSelector.value;
       debugPrintln(`Set timezone button clicked with timezone: ${selectedTimezone}`);
       setTimezone(selectedTimezone);
+    });
+  }
+  
+  // Filesystem refresh button event listener
+  if (refreshFsButton) {
+    refreshFsButton.addEventListener('click', () => {
+      debugPrintln("Refresh filesystem info button clicked");
+      fetchFilesystemInfo();
     });
   }
   
@@ -371,12 +457,16 @@ function initDashboard() {
   // Fetch initial status
   fetchIOStatus();
   fetchTimeStatus();
+  fetchFilesystemInfo();
   
   // Update IO status every 500ms
   setInterval(fetchIOStatus, 500);
   
   // Update time status every 5 seconds
   setInterval(fetchTimeStatus, 5000);
+  
+  // Update filesystem info every 30 seconds
+  setInterval(fetchFilesystemInfo, 30000);
 }
 
 // Start dashboard initialization when DOM is ready

@@ -8,6 +8,7 @@ import { schedulerState } from '../state';
 export function renderActiveSchedules() {
   debugPrintln("Rendering active schedules section");
   
+  // Get container directly from DOM instead of relying on module variable
   const activeSchedulesContainer = document.getElementById("active-schedules-container");
   
   if (!activeSchedulesContainer) {

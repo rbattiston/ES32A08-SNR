@@ -19,7 +19,7 @@
     </header>
     
     <main>
-      <!-- Time and Timezone Section (NEW) -->
+      <!-- Time and Timezone Section -->
       <section class="card" id="time-settings">
         <h2>Time Settings</h2>
         <div class="time-display">
@@ -46,6 +46,36 @@
               </select>
               <button id="set-timezone">Apply Timezone</button>
             </div>
+          </div>
+        </div>
+      </section>
+      
+      <!-- SPIFFS Filesystem Information Section -->
+      <section class="card" id="filesystem-info">
+        <h2>Filesystem Information</h2>
+        <div class="filesystem-display">
+          <div class="info-row">
+            <div class="info-label">Total Space:</div>
+            <div class="info-value" id="total-space">Loading...</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">Used Space:</div>
+            <div class="info-value" id="used-space">Loading...</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">Free Space:</div>
+            <div class="info-value" id="free-space">Loading...</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">Total Files:</div>
+            <div class="info-value" id="file-count">Loading...</div>
+          </div>
+          <div id="file-list-container">
+            <h3>Files:</h3>
+            <div id="file-list" class="file-list">Loading...</div>
+          </div>
+          <div class="controls">
+            <button id="refresh-fs-info" class="btn-secondary">Refresh Info</button>
           </div>
         </div>
       </section>

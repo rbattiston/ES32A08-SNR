@@ -13,6 +13,7 @@ async function initScheduler() {
   debugPrintln("Initializing scheduler application");
   
   // Initialize UI
+  debugPrintln("Initializing UI references");
   initUI();
   
   // Initialize modal event listeners

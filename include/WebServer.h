@@ -16,7 +16,8 @@ void initWiFiRoutes();
 void initIORoutes();
 void initModbusRoutes();
 void initSchedulerRoutes();
-void initTimeRoutes();  // New function for time routes
+void initTimeRoutes();
+void initFilesystemRoutes();  // New function for filesystem routes
 
 // API handlers for IO
 void handleGetIOStatus(AsyncWebServerRequest *request);
@@ -30,6 +31,9 @@ void handleTestWiFiConnection(AsyncWebServerRequest *request, uint8_t *data, siz
 
 // API handlers for MODBUS
 void handleModbusRequest(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
+
+// API handlers for Filesystem
+void handleGetFilesystemInfo(AsyncWebServerRequest *request);
 
 // External variables
 extern AsyncWebServer server;

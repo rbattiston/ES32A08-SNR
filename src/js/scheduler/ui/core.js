@@ -14,7 +14,7 @@ let lightsOnInput;
 let lightsOffInput;
 let eventList;
 let timelineContainer;
-let activeSchedulesContainer;
+let activeSchedulesContainer; // Properly declared at module level
 let addEventButton;
 let saveScheduleButton;
 let activateSchedulerButton;
