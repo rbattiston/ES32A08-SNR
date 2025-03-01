@@ -55,7 +55,7 @@ String utcToLocalTime(const String& utcTime);
 
 // API handlers
 void handleLoadSchedulerState(AsyncWebServerRequest *request);
-void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, size_t len);
+void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
 void handleSchedulerStatus(AsyncWebServerRequest *request);
 void handleActivateScheduler(AsyncWebServerRequest *request);
 void handleDeactivateScheduler(AsyncWebServerRequest *request);

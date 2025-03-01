@@ -237,13 +237,23 @@ void initSchedulerRoutes() {
   
   // API endpoint to load scheduler state
   server.on("/api/scheduler/load", HTTP_GET, handleLoadSchedulerState);
-  
+
   // API endpoint to save scheduler state
   server.on("/api/scheduler/save", HTTP_POST, 
-    [](AsyncWebServerRequest *request) {},
-    NULL,
+    [](AsyncWebServerRequest *request) {},  // Request handler
+    NULL,  // Upload handler
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-      handleSaveSchedulerState(request, data, len);
+      // Body handler 
+      // Increase the valid content length for large payloads
+      if (len > 0) {
+        // Log the data size for debugging
+        debugPrintf("Received data chunk: %d bytes, index: %d, total: %d\n", len, index, total);
+        
+        // Only process when we have the complete data
+        if (index + len == total) {
+          handleSaveSchedulerState(request, data, len, index, total); // Pass all 5 parameters
+        }
+      }
     }
   );
   

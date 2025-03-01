@@ -77,6 +77,17 @@ export async function saveSchedulerState() {
   // Update the active schedule with UI values first
   updateActiveScheduleFromUI();
   
+  // Log event IDs for debugging
+  for (let i = 0; i < schedulerState.scheduleCount; i++) {
+    const schedule = schedulerState.schedules[i];
+    if (schedule.events && schedule.events.length > 0) {
+      console.log(`Schedule ${i} (${schedule.name}) has ${schedule.events.length} events:`);
+      schedule.events.forEach((event, idx) => {
+        console.log(`  Event ${idx}: ID=${event.id}, Time=${event.time}, Duration=${event.duration}`);
+      });
+    }
+  }
+
   // Ensure consistent events array and eventCount
   for (let i = 0; i < schedulerState.scheduleCount; i++) {
     const schedule = schedulerState.schedules[i];
@@ -90,11 +101,16 @@ export async function saveSchedulerState() {
     schedule.eventCount = schedule.events.length;
   }
   
+   // INSERT YOUR NEW CODE HERE:
+  const jsonData = JSON.stringify(schedulerState);
+  console.log(`Sending data to server (${jsonData.length} bytes):`);
+  console.log(jsonData.substring(0, 200) + '...'); // Show just the first 200 chars to avoid flooding the console
+   
   try {
     const response = await fetch("/api/scheduler/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(schedulerState)
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: jsonData  // Use the jsonData variable instead of JSON.stringify(schedulerState)
     });
     
     if (!response.ok) {

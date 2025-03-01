@@ -7,22 +7,20 @@ import { initUI, populateScheduleDropdown, loadActiveSchedule, updateAllSchedule
 import { renderEventList, renderTimeline, addEvent, initModalListeners } from './ui/events';
 import { renderActiveSchedules } from './ui/active-schedules';
 import { updateSchedulerStatus, activateScheduler, deactivateScheduler } from './api';
+import { startTimelineUpdates, updateCurrentTimeLine } from './ui/timeline';
 
 // Initialize the scheduler app
 async function initScheduler() {
   debugPrintln("Initializing scheduler application");
   
   // Initialize UI
-  debugPrintln("Initializing UI references");
   initUI();
   
   // Initialize modal event listeners
   initModalListeners();
   
   // Start timeline updates
-  import('./ui/timeline').then(timeline => {
-    timeline.startTimelineUpdates();
-  });
+  startTimelineUpdates();
   
   // Load scheduler state
   const success = await loadSchedulerState();

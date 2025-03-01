@@ -5,7 +5,7 @@ module.exports = {
   entry: './src/js/scheduler/index.js',
   output: {
     filename: 'scheduler-bundle.js',
-    path: path.resolve(__dirname, 'data/js')
+    path: path.resolve(__dirname, 'data/js'),
   },
   module: {
     rules: [
@@ -31,5 +31,14 @@ module.exports = {
       },
       extractComments: false,
     })],
+    runtimeChunk: false,
+    splitChunks: {
+      cacheGroups: {
+        default: false
+      }
+    }
+  },
+  performance: {
+    hints: false
   }
 };

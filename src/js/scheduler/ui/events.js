@@ -1,8 +1,20 @@
 /**
  * Event-related UI functions for the scheduler
  */
+
+let updateCurrentTimeLine = () => {
+  console.log("Timeline update function not loaded yet");
+};
+
+//import { updateCurrentTimeLine } from './timeline';
 import { MAX_EVENTS, debugPrintln } from '../constants';
 import { schedulerState, saveSchedulerState } from '../state';
+
+
+import('./timeline').then(timeline => {
+  updateCurrentTimeLine = timeline.updateCurrentTimeLine;
+  timeline.startTimelineUpdates();
+});
 
 // Variables for event editing modal
 let currentEditingIndex = null;
@@ -300,6 +312,12 @@ export function addEvent() {
     const occurrenceMinute = occurrenceMinutes % 60;
     const occurrenceTime = `${occurrenceHour.toString().padStart(2, "0")}:${occurrenceMinute.toString().padStart(2, "0")}`;
     
+    // Generate the event ID
+    const eventId = Date.now().toString() + "_" + i;
+    
+    // Log the event ID
+    console.log(`Creating event with ID: ${eventId}, time: ${occurrenceTime}, duration: ${duration}`);
+
     // Create new event
     const newEvent = {
       id: Date.now().toString() + "_" + i,
