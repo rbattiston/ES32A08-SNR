@@ -159,7 +159,8 @@ void stopSchedulerTask() {
   debugPrintln("Scheduler deactivated");
 }
 
-// Check and execute any scheduled events
+// This is an improved version of the checkAndExecuteScheduledEvents function for src/Scheduler.cpp
+
 void checkAndExecuteScheduledEvents() {
   // Get current time in UTC
   time_t now = time(NULL);
@@ -173,6 +174,11 @@ void checkAndExecuteScheduledEvents() {
   
   lastEventCheckTime = now;
   
+  // Format current time for logging
+  char timeStr[20];
+  strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &utcTime);
+  debugPrintf("DEBUG: Checking scheduled events at %s UTC\n", timeStr);
+  
   // Current time in minutes since midnight (UTC)
   int currentMinute = utcTime.tm_hour * 60 + utcTime.tm_min;
   
@@ -185,6 +191,9 @@ void checkAndExecuteScheduledEvents() {
       continue;
     }
     
+    debugPrintf("DEBUG: Checking schedule '%s' (relayMask: 0x%02X)\n", 
+               schedule.name.c_str(), schedule.relayMask);
+    
     // Check each event in this schedule
     for (int eventIdx = 0; eventIdx < schedule.eventCount; eventIdx++) {
       Event& event = schedule.events[eventIdx];
@@ -194,27 +203,60 @@ void checkAndExecuteScheduledEvents() {
       sscanf(event.time.c_str(), "%d:%d", &eventHour, &eventMinute);
       int eventStartMinute = eventHour * 60 + eventMinute;
       
-      // Check if this event should start now
-      if (eventStartMinute == currentMinute && (event.executedMask & 0x01) == 0) {
-        debugPrintf("Executing event from schedule '%s': time %s, duration %d seconds\n", 
-                   schedule.name.c_str(), event.time.c_str(), event.duration);
+      // Check if this event should start now (compare minutes since midnight)
+      if (eventStartMinute == currentMinute) {
+        // Check if this event has already been executed today
+        // Bit 0 in executedMask is for today's execution status
+        bool alreadyExecuted = (event.executedMask & 0x01) != 0;
         
-        // Set the executed flag for this event
-        event.executedMask |= 0x01;
-        
-        // Activate the relays specified by the schedule's relay mask
-        for (int relay = 0; relay < 8; relay++) {
-          if (schedule.relayMask & (1 << relay)) {
-            executeRelayCommand(relay, event.duration);
+        if (!alreadyExecuted) {
+          debugPrintf("DEBUG: Executing event from schedule '%s': time %s, duration %d seconds, relayMask 0x%02X\n", 
+                     schedule.name.c_str(), event.time.c_str(), event.duration, schedule.relayMask);
+          
+          // Set the executed flag for this event
+          event.executedMask |= 0x01;
+          
+          // Activate the relays specified by the schedule's relay mask
+          for (int relay = 0; relay < 8; relay++) {
+            if (schedule.relayMask & (1 << relay)) {
+              debugPrintf("DEBUG: Activating relay %d for %d seconds\n", relay, event.duration);
+              executeRelayCommand(relay, event.duration);
+            }
           }
+        } else {
+          debugPrintf("DEBUG: Event at %s already executed today, skipping\n", event.time.c_str());
         }
       }
     }
   }
+  
+  // Check if day has changed since last check
+  static int lastDay = -1;
+  if (lastDay != utcTime.tm_mday) {
+    debugPrintf("DEBUG: Day changed from %d to %d, resetting execution flags\n", 
+               lastDay, utcTime.tm_mday);
+    
+    // Reset all execution flags when the day changes
+    for (int scheduleIdx = 0; scheduleIdx < schedulerState.scheduleCount; scheduleIdx++) {
+      Schedule& schedule = schedulerState.schedules[scheduleIdx];
+      for (int eventIdx = 0; eventIdx < schedule.eventCount; eventIdx++) {
+        schedule.events[eventIdx].executedMask = 0;
+      }
+    }
+    
+    lastDay = utcTime.tm_mday;
+  }
 }
 
-// Create an event controlled by a timer to activate and deactivate a relay
+// This is an improved version of the executeRelayCommand function for src/Scheduler.cpp
+
 void executeRelayCommand(uint8_t relay, uint16_t duration) {
+  // Validate parameters
+  if (relay >= 8 || duration == 0) {
+    debugPrintf("ERROR: Invalid relay (%d) or duration (%d)\n", relay, duration);
+    return;
+  }
+
   // Structure to pass parameters to the relay task
   struct RelayTaskParams {
     uint8_t relay;
@@ -226,6 +268,8 @@ void executeRelayCommand(uint8_t relay, uint16_t duration) {
   params->relay = relay;
   params->duration = duration;
   
+  debugPrintf("DEBUG: Creating relay task for relay %d, duration %d seconds\n", relay, duration);
+  
   // Create a task that will turn on the relay and then turn it off after the duration
   xTaskCreatePinnedToCore(
     [](void* parameter) {
@@ -233,7 +277,7 @@ void executeRelayCommand(uint8_t relay, uint16_t duration) {
       
       // Turn on the relay
       setRelay(params->relay, true);
-      debugPrintf("Relay %d turned ON, will remain on for %d seconds\n", 
+      debugPrintf("DEBUG: Relay %d turned ON, will remain on for %d seconds\n", 
                  params->relay, params->duration);
       
       // Wait for the specified duration
@@ -241,7 +285,7 @@ void executeRelayCommand(uint8_t relay, uint16_t duration) {
       
       // Turn off the relay
       setRelay(params->relay, false);
-      debugPrintf("Relay %d turned OFF after %d seconds\n", 
+      debugPrintf("DEBUG: Relay %d turned OFF after %d seconds\n", 
                  params->relay, params->duration);
       
       // Clean up
@@ -249,12 +293,15 @@ void executeRelayCommand(uint8_t relay, uint16_t duration) {
       vTaskDelete(NULL);
     },
     "RelayTask",
-    2048,
+    4096,  // Increased stack size for safety
     params,
-    1,
+    2,     // Higher priority to ensure timely execution
     NULL,
-    1
+    1      // Run on core 1
   );
+  
+  // Log after task creation for debugging
+  debugPrintln("DEBUG: Relay task created successfully");
 }
 
 // Create a new empty schedule
@@ -293,8 +340,9 @@ void addNewSchedule(const String& name) {
 }
 
 // Load scheduler state from SPIFFS
+// 4. Enhanced schedule loading debug output
 void loadSchedulerState() {
-  debugPrintln("Loading scheduler state from SPIFFS");
+  debugPrintln("DEBUG: Loading scheduler state from SPIFFS");
   
   // Initialize empty state
   schedulerState.scheduleCount = 0;
@@ -302,22 +350,22 @@ void loadSchedulerState() {
   
   // Check if the scheduler file exists
   if (!SPIFFS.exists(SCHEDULER_FILE)) {
-    debugPrintln("Scheduler file not found, using defaults");
+    debugPrintln("DEBUG: Scheduler file not found, using defaults");
     return;
   }
   
   // Open the file
   File file = SPIFFS.open(SCHEDULER_FILE, FILE_READ);
   if (!file) {
-    debugPrintln("Failed to open scheduler file for reading");
+    debugPrintln("DEBUG: Failed to open scheduler file for reading");
     return;
   }
   
   // Check file size
   size_t size = file.size();
-  debugPrintf("Scheduler file size: %d bytes\n", size);
+  debugPrintf("DEBUG: Scheduler file size: %d bytes\n", size);
   if (size == 0) {
-    debugPrintln("Scheduler file is empty");
+    debugPrintln("DEBUG: Scheduler file is empty");
     file.close();
     return;
   }
@@ -329,7 +377,7 @@ void loadSchedulerState() {
   
   // Check for parsing errors
   if (error) {
-    debugPrintf("Failed to parse scheduler JSON: %s\n", error.c_str());
+    debugPrintf("DEBUG: Failed to parse scheduler JSON: %s\n", error.c_str());
     return;
   }
   
@@ -340,6 +388,9 @@ void loadSchedulerState() {
   // Load schedules
   JsonArray schedules = doc["schedules"].as<JsonArray>();
   schedulerState.scheduleCount = 0; // Reset counter
+  
+  debugPrintln("DEBUG: Loading scheduler state from SPIFFS");
+  
   for (JsonObject schObj : schedules) {
     if (schedulerState.scheduleCount < MAX_SCHEDULES) {
       Schedule& sch = schedulerState.schedules[schedulerState.scheduleCount];
@@ -349,9 +400,18 @@ void loadSchedulerState() {
       sch.lightsOnTime = schObj["lightsOnTime"].as<String>();
       sch.lightsOffTime = schObj["lightsOffTime"].as<String>();
       
+      debugPrintf("DEBUG: Loading schedule [%d]: \"%s\"\n", 
+                 schedulerState.scheduleCount, sch.name.c_str());
+      debugPrintf("DEBUG:   - Relay Mask: 0x%02X\n", sch.relayMask);
+      debugPrintf("DEBUG:   - Lights: ON %s, OFF %s\n", 
+                 sch.lightsOnTime.c_str(), sch.lightsOffTime.c_str());
+      
       // Load events
       JsonArray events = schObj["events"].as<JsonArray>();
       sch.eventCount = 0;
+      
+      debugPrintf("DEBUG:   - Events to load: %d\n", events.size());
+      
       for (JsonObject evt : events) {
         if (sch.eventCount < MAX_EVENTS) {
           Event& e = sch.events[sch.eventCount];
@@ -359,24 +419,39 @@ void loadSchedulerState() {
           e.time = evt["time"].as<String>();
           e.duration = evt["duration"].as<uint16_t>();
           e.executedMask = 0; // Reset execution flag
+          
+          debugPrintf("DEBUG:     Event [%d]: Time %s, Duration %d seconds, ID \"%s\"\n", 
+                     sch.eventCount, e.time.c_str(), e.duration, e.id.c_str());
+          
           sch.eventCount++;
+        } else {
+          debugPrintf("DEBUG:     WARNING: Event limit reached (%d), skipping additional events\n", 
+                     MAX_EVENTS);
+          break;
         }
       }
       schedulerState.scheduleCount++;
+    } else {
+      debugPrintf("DEBUG:   WARNING: Schedule limit reached (%d), skipping additional schedules\n", 
+                 MAX_SCHEDULES);
+      break;
     }
   }
   
-  debugPrintf("Loaded %d schedules from SPIFFS\n", schedulerState.scheduleCount);
+  debugPrintf("DEBUG: Loaded %d schedules from SPIFFS\n", schedulerState.scheduleCount);
 }
 
 // Save scheduler state to SPIFFS
+// 1. Enhanced schedule saving debug output
 void saveSchedulerState() {
-  debugPrintln("Saving scheduler state to SPIFFS");
+  debugPrintln("DEBUG: Saving scheduler state to SPIFFS");
   
   // Create JSON document
   DynamicJsonDocument doc(4096);
   doc["scheduleCount"] = schedulerState.scheduleCount;
   doc["currentScheduleIndex"] = schedulerState.currentScheduleIndex;
+  
+  debugPrintln("DEBUG: Saving scheduler state with following schedules:");
   
   // Add schedules
   JsonArray schedules = doc.createNestedArray("schedules");
@@ -389,6 +464,12 @@ void saveSchedulerState() {
     schObj["lightsOnTime"] = sch.lightsOnTime;
     schObj["lightsOffTime"] = sch.lightsOffTime;
     
+    // Print schedule info
+    debugPrintf("DEBUG: Schedule [%d]: \"%s\"\n", i, sch.name.c_str());
+    debugPrintf("DEBUG:   - Relay Mask: 0x%02X\n", sch.relayMask);
+    debugPrintf("DEBUG:   - Lights: ON %s, OFF %s\n", sch.lightsOnTime.c_str(), sch.lightsOffTime.c_str());
+    debugPrintf("DEBUG:   - Event count: %d\n", sch.eventCount);
+    
     // Add events
     JsonArray events = schObj.createNestedArray("events");
     for (int j = 0; j < sch.eventCount; j++) {
@@ -397,24 +478,29 @@ void saveSchedulerState() {
       evtObj["id"] = evt.id;
       evtObj["time"] = evt.time;
       evtObj["duration"] = evt.duration;
+      
+      // Print event info
+      debugPrintf("DEBUG:     Event [%d]: Time %s, Duration %d seconds, ID \"%s\"\n", 
+                 j, evt.time.c_str(), evt.duration, evt.id.c_str());
     }
   }
   
   // Open file for writing
   File file = SPIFFS.open(SCHEDULER_FILE, FILE_WRITE);
   if (!file) {
-    debugPrintln("Failed to open scheduler file for writing");
+    debugPrintln("DEBUG: Failed to open scheduler file for writing");
     return;
   }
   
   // Write JSON to file
   if (serializeJson(doc, file) == 0) {
-    debugPrintln("Failed to write to scheduler file");
+    debugPrintln("DEBUG: Failed to write to scheduler file");
   }
   
   file.close();
-  debugPrintln("Scheduler state saved to SPIFFS");
+  debugPrintln("DEBUG: Scheduler state saved to SPIFFS");
 }
+
 
 // API Handlers
 void handleLoadSchedulerState(AsyncWebServerRequest *request) {
