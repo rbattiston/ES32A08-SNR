@@ -3,6 +3,10 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include "IOManager.h"
+#include <ESPAsyncWebServer.h>
+
+// Reference to the web server defined elsewhere in the project
+extern AsyncWebServer server;
 
 // Debug macros
 #ifndef debugPrintln
@@ -18,8 +22,23 @@ static TaskHandle_t schedulerTaskHandle = NULL;
 static bool schedulerActive = false;
 static time_t lastEventCheckTime = 0;
 
+// Global WebSocket objects
+AsyncWebSocket schedulerWs("/scheduler-ws");
+EditSession currentSession;
+unsigned long lastTimeoutCheck = 0;
+
 // Forward declarations
 void checkAndExecuteScheduledEvents();
+void handleWebSocketEvent(AsyncWebSocket* webSocket, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len);
+void handleWebSocketMessage(AsyncWebSocket* webSocket, AsyncWebSocketClient* client, AwsFrameInfo* info, uint8_t* data, size_t len);
+JsonObject serializeSchedule(Schedule& schedule, bool convertToLocalTime);
+void sendSchedulerState(AsyncWebSocketClient* client);
+void resetSession();
+String generateSessionId();
+void sendErrorResponse(AsyncWebSocketClient* client, const String& message);
+void broadcastSchedulerUpdate();
+void checkSchedulerTimeouts();
+void updateSchedulerWebSocket();
 
 // Convert times between local and UTC formats
 String localTimeToUTC(const String& localTime) {
@@ -688,4 +707,536 @@ void handleManualWatering(AsyncWebServerRequest *request, uint8_t *data, size_t 
   
   // Send response
   request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Manual watering executed\"}");
+}
+
+// Initialize the WebSocket server
+void initSchedulerWebSocket() {
+  debugPrintln("Initializing scheduler WebSocket server");
+  
+  // Set default session state
+  currentSession.sessionId = "";
+  currentSession.lastActivity = 0;
+  currentSession.mode = MODE_VIEW_ONLY;
+  currentSession.editingScheduleIndex = -1;
+  currentSession.isDirty = false;
+  
+  // Set up event handler
+  schedulerWs.onEvent(handleWebSocketEvent);
+  
+  // Add to your existing web server
+  server.addHandler(&schedulerWs);
+  
+  debugPrintln("Scheduler WebSocket server initialized");
+}
+
+// Handle WebSocket events
+void handleWebSocketEvent(AsyncWebSocket* webSocket, AsyncWebSocketClient* client, 
+                        AwsEventType type, void* arg, uint8_t* data, size_t len) {
+  switch (type) {
+    case WS_EVT_CONNECT:
+      debugPrintf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+      break;
+      
+    case WS_EVT_DISCONNECT:
+      debugPrintf("WebSocket client #%u disconnected\n", client->id());
+      // Don't reset session immediately, allow for reconnection
+      break;
+      
+    case WS_EVT_DATA:
+      handleWebSocketMessage(webSocket, client, (AwsFrameInfo*)arg, data, len);
+      break;
+      
+    case WS_EVT_PONG:
+    case WS_EVT_ERROR:
+      break;
+  }
+}
+
+// Process WebSocket messages
+void handleWebSocketMessage(AsyncWebSocket* webSocket, AsyncWebSocketClient* client, 
+                          AwsFrameInfo* info, uint8_t* data, size_t len) {
+  // Ensure the data is a complete message
+  if (info->final && info->index == 0 && info->len == len) {
+    // Null terminate the received data
+    data[len] = 0;
+    
+    // Parse JSON message
+    DynamicJsonDocument doc(4096);
+    DeserializationError error = deserializeJson(doc, (char*)data);
+    
+    if (error) {
+      debugPrintf("WebSocket JSON parse error: %s\n", error.c_str());
+      
+      // Send error response
+      DynamicJsonDocument errorDoc(512);
+      errorDoc["type"] = "error";
+      errorDoc["message"] = "Invalid JSON format";
+      
+      String response;
+      serializeJson(errorDoc, response);
+      client->text(response);
+      return;
+    }
+    
+    // Update activity timestamp for timeout management
+    currentSession.lastActivity = millis();
+    
+    // Get message type
+    String messageType = doc["type"];
+    debugPrintf("Received WebSocket message type: %s\n", messageType.c_str());
+    
+    if (messageType == "reconnect") {
+      // Handle reconnection with session ID
+      String sessionId = doc["sessionId"];
+      if (sessionId == currentSession.sessionId) {
+        // Resume existing session
+        DynamicJsonDocument responseDoc(4096);
+        responseDoc["type"] = "session_restored";
+        responseDoc["mode"] = currentSession.mode;
+        
+        if (currentSession.mode == MODE_EDITING) {
+          responseDoc["editingIndex"] = currentSession.editingScheduleIndex;
+        }
+        
+        String response;
+        serializeJson(responseDoc, response);
+        client->text(response);
+      } else {
+        // Invalid session, revert to view-only mode
+        resetSession();
+        
+        DynamicJsonDocument responseDoc(512);
+        responseDoc["type"] = "session_expired";
+        responseDoc["mode"] = MODE_VIEW_ONLY;
+        
+        String response;
+        serializeJson(responseDoc, response);
+        client->text(response);
+      }
+    }
+    else if (messageType == "start_create") {
+      // Start creating a new schedule
+      if (currentSession.mode != MODE_VIEW_ONLY) {
+        String modeStr = (currentSession.mode == MODE_CREATING ? "create" : "edit");
+        sendErrorResponse(client, "Cannot create new schedule while in " + modeStr + " mode");
+        return;
+      }
+      
+      // Generate new session ID
+      currentSession.sessionId = generateSessionId();
+      currentSession.mode = MODE_CREATING;
+      currentSession.editingScheduleIndex = -1;
+      currentSession.isDirty = false;
+      
+      // Initialize empty pending schedule
+      currentSession.pendingSchedule = {};
+      currentSession.pendingSchedule.name = "New Schedule";
+      currentSession.pendingSchedule.relayMask = 0;
+      currentSession.pendingSchedule.lightsOnTime = "06:00";  // Default UTC time
+      currentSession.pendingSchedule.lightsOffTime = "18:00"; // Default UTC time
+      currentSession.pendingSchedule.eventCount = 0;
+      
+      // Get the current time for metadata
+      time_t now = time(NULL);
+      struct tm timeInfo;
+      localtime_r(&now, &timeInfo);
+      char timeStr[64];
+      strftime(timeStr, sizeof(timeStr), "Created on %Y-%m-%d %H:%M", &timeInfo);
+      currentSession.pendingSchedule.metadata = timeStr;
+      
+      // Send response
+      DynamicJsonDocument responseDoc(4096);
+      responseDoc["type"] = "create_started";
+      responseDoc["sessionId"] = currentSession.sessionId;
+      responseDoc["schedule"] = serializeSchedule(currentSession.pendingSchedule, true); // Convert times to local
+      
+      String response;
+      serializeJson(responseDoc, response);
+      client->text(response);
+    }
+    else if (messageType == "start_edit") {
+      // Start editing an existing schedule
+      if (currentSession.mode != MODE_VIEW_ONLY) {
+        String modeStr = (currentSession.mode == MODE_CREATING ? "create" : "edit");
+        sendErrorResponse(client, "Cannot edit schedule while in " + modeStr + " mode");
+        return;
+      }
+      
+      int scheduleIndex = doc["scheduleIndex"];
+      if (scheduleIndex < 0 || scheduleIndex >= schedulerState.scheduleCount) {
+        sendErrorResponse(client, "Invalid schedule index");
+        return;
+      }
+      
+      // Generate new session ID
+      currentSession.sessionId = generateSessionId();
+      currentSession.mode = MODE_EDITING;
+      currentSession.editingScheduleIndex = scheduleIndex;
+      currentSession.isDirty = false;
+      
+      // Create a copy of the schedule for editing
+      currentSession.pendingSchedule = schedulerState.schedules[scheduleIndex];
+      
+      // Send response
+      DynamicJsonDocument responseDoc(4096);
+      responseDoc["type"] = "edit_started";
+      responseDoc["sessionId"] = currentSession.sessionId;
+      responseDoc["scheduleIndex"] = scheduleIndex;
+      responseDoc["schedule"] = serializeSchedule(currentSession.pendingSchedule, true); // Convert times to local
+      
+      String response;
+      serializeJson(responseDoc, response);
+      client->text(response);
+    }
+    else if (messageType == "update_schedule") {
+      // Update the pending schedule
+      if (currentSession.mode == MODE_VIEW_ONLY) {
+        sendErrorResponse(client, "Cannot update schedule in view-only mode");
+        return;
+      }
+      
+      // Verify session ID
+      String sessionId = doc["sessionId"];
+      if (sessionId != currentSession.sessionId) {
+        sendErrorResponse(client, "Invalid session ID");
+        return;
+      }
+      
+      // Get schedule updates
+      JsonObject scheduleData = doc["schedule"];
+      
+      // Update the pending schedule
+      if (scheduleData.containsKey("name")) {
+        currentSession.pendingSchedule.name = scheduleData["name"].as<String>();
+      }
+      
+      if (scheduleData.containsKey("relayMask")) {
+        currentSession.pendingSchedule.relayMask = scheduleData["relayMask"].as<uint8_t>();
+      }
+      
+      if (scheduleData.containsKey("lightsOnTime")) {
+        // Convert from local to UTC
+        currentSession.pendingSchedule.lightsOnTime = 
+          localTimeToUTC(scheduleData["lightsOnTime"].as<String>());
+      }
+      
+      if (scheduleData.containsKey("lightsOffTime")) {
+        // Convert from local to UTC
+        currentSession.pendingSchedule.lightsOffTime = 
+          localTimeToUTC(scheduleData["lightsOffTime"].as<String>());
+      }
+      
+      // Handle events if present
+      if (scheduleData.containsKey("events")) {
+        JsonArray events = scheduleData["events"].as<JsonArray>();
+        currentSession.pendingSchedule.eventCount = 0;
+        
+        for (JsonObject evt : events) {
+          if (currentSession.pendingSchedule.eventCount >= MAX_EVENTS) break;
+          
+          Event& e = currentSession.pendingSchedule.events[currentSession.pendingSchedule.eventCount];
+          e.id = evt["id"].as<String>();
+          e.time = localTimeToUTC(evt["time"].as<String>());
+          e.duration = evt["duration"].as<uint16_t>();
+          e.executedMask = 0; // Reset execution flag
+          
+          currentSession.pendingSchedule.eventCount++;
+        }
+      }
+      
+      currentSession.isDirty = true;
+      
+      // Send acknowledgement
+      DynamicJsonDocument responseDoc(512);
+      responseDoc["type"] = "update_acknowledged";
+      responseDoc["sessionId"] = currentSession.sessionId;
+      
+      String response;
+      serializeJson(responseDoc, response);
+      client->text(response);
+    }
+    else if (messageType == "save_schedule") {
+      // Save the pending schedule
+      if (currentSession.mode == MODE_VIEW_ONLY) {
+        sendErrorResponse(client, "Cannot save schedule in view-only mode");
+        return;
+      }
+      
+      // Verify session ID
+      String sessionId = doc["sessionId"];
+      if (sessionId != currentSession.sessionId) {
+        sendErrorResponse(client, "Invalid session ID");
+        return;
+      }
+      
+      // For creating mode, append new schedule
+      if (currentSession.mode == MODE_CREATING) {
+        if (schedulerState.scheduleCount >= MAX_SCHEDULES) {
+          sendErrorResponse(client, "Maximum number of schedules reached");
+          return;
+        }
+        
+        // Add the new schedule
+        schedulerState.schedules[schedulerState.scheduleCount] = currentSession.pendingSchedule;
+        schedulerState.scheduleCount++;
+      }
+      // For editing mode, update existing schedule
+      else if (currentSession.mode == MODE_EDITING) {
+        schedulerState.schedules[currentSession.editingScheduleIndex] = currentSession.pendingSchedule;
+      }
+      
+      // Save to SPIFFS
+      saveSchedulerState();
+      
+      // Reset session to view-only mode
+      resetSession();
+      
+      // Send success response
+      DynamicJsonDocument responseDoc(512);
+      responseDoc["type"] = "save_successful";
+      responseDoc["mode"] = MODE_VIEW_ONLY;
+      
+      String response;
+      serializeJson(responseDoc, response);
+      client->text(response);
+      
+      // Broadcast to all clients that data has changed
+      broadcastSchedulerUpdate();
+    }
+    else if (messageType == "cancel") {
+      // Cancel editing/creating
+      if (currentSession.mode == MODE_VIEW_ONLY) {
+        sendErrorResponse(client, "Already in view-only mode");
+        return;
+      }
+      
+      // Verify session ID
+      String sessionId = doc["sessionId"];
+      if (sessionId != currentSession.sessionId) {
+        sendErrorResponse(client, "Invalid session ID");
+        return;
+      }
+      
+      // Reset session
+      resetSession();
+      
+      // Send acknowledgement
+      DynamicJsonDocument responseDoc(512);
+      responseDoc["type"] = "edit_cancelled";
+      responseDoc["mode"] = MODE_VIEW_ONLY;
+      
+      String response;
+      serializeJson(responseDoc, response);
+      client->text(response);
+    }
+    else if (messageType == "delete_schedule") {
+      // Delete a schedule
+      int scheduleIndex = doc["scheduleIndex"];
+      if (scheduleIndex < 0 || scheduleIndex >= schedulerState.scheduleCount) {
+        sendErrorResponse(client, "Invalid schedule index");
+        return;
+      }
+      
+      // Shift remaining schedules
+      for (int i = scheduleIndex; i < schedulerState.scheduleCount - 1; i++) {
+        schedulerState.schedules[i] = schedulerState.schedules[i + 1];
+      }
+      
+      // Decrement count
+      schedulerState.scheduleCount--;
+      
+      // Update current index if needed
+      if (schedulerState.currentScheduleIndex >= schedulerState.scheduleCount) {
+        schedulerState.currentScheduleIndex = schedulerState.scheduleCount > 0 ? 
+                                             schedulerState.scheduleCount - 1 : 0;
+      }
+      
+      // Save changes
+      saveSchedulerState();
+      
+      // Reset any active editing session
+      resetSession();
+      
+      // Send success response
+      DynamicJsonDocument responseDoc(512);
+      responseDoc["type"] = "delete_successful";
+      
+      String response;
+      serializeJson(responseDoc, response);
+      client->text(response);
+      
+      // Broadcast to all clients that data has changed
+      broadcastSchedulerUpdate();
+    }
+    else if (messageType == "get_state") {
+      // Send current scheduler state
+      sendSchedulerState(client);
+    }
+    else {
+      // Unknown message type
+      sendErrorResponse(client, "Unknown message type: " + messageType);
+    }
+  }
+}
+
+// Helper to serialize a schedule to JSON
+JsonObject serializeSchedule(Schedule& schedule, bool convertToLocalTime) {
+  DynamicJsonDocument doc(4096);
+  JsonObject obj = doc.to<JsonObject>();
+  
+  obj["name"] = schedule.name;
+  obj["metadata"] = schedule.metadata;
+  obj["relayMask"] = schedule.relayMask;
+  
+  // Handle time conversion
+  if (convertToLocalTime) {
+    obj["lightsOnTime"] = utcToLocalTime(schedule.lightsOnTime);
+    obj["lightsOffTime"] = utcToLocalTime(schedule.lightsOffTime);
+  } else {
+    obj["lightsOnTime"] = schedule.lightsOnTime;
+    obj["lightsOffTime"] = schedule.lightsOffTime;
+  }
+  
+  // Add events
+  JsonArray events = obj.createNestedArray("events");
+  for (int i = 0; i < schedule.eventCount; i++) {
+    Event& evt = schedule.events[i];
+    JsonObject evtObj = events.createNestedObject();
+    evtObj["id"] = evt.id;
+    
+    if (convertToLocalTime) {
+      evtObj["time"] = utcToLocalTime(evt.time);
+    } else {
+      evtObj["time"] = evt.time;
+    }
+    
+    evtObj["duration"] = evt.duration;
+  }
+  
+  return obj;
+}
+
+// Send current scheduler state to client
+void sendSchedulerState(AsyncWebSocketClient* client) {
+  DynamicJsonDocument doc(8192);
+  doc["type"] = "scheduler_state";
+  doc["scheduleCount"] = schedulerState.scheduleCount;
+  doc["currentScheduleIndex"] = schedulerState.currentScheduleIndex;
+  doc["mode"] = currentSession.mode;
+  
+  if (currentSession.mode != MODE_VIEW_ONLY) {
+    doc["sessionId"] = currentSession.sessionId;
+    doc["editingIndex"] = currentSession.editingScheduleIndex;
+  }
+  
+  // Add schedules
+  JsonArray schedules = doc.createNestedArray("schedules");
+  for (int i = 0; i < schedulerState.scheduleCount; i++) {
+    JsonObject schObj = schedules.createNestedObject();
+    Schedule& sch = schedulerState.schedules[i];
+    
+    schObj["name"] = sch.name;
+    schObj["metadata"] = sch.metadata;
+    schObj["relayMask"] = sch.relayMask;
+    schObj["lightsOnTime"] = utcToLocalTime(sch.lightsOnTime);
+    schObj["lightsOffTime"] = utcToLocalTime(sch.lightsOffTime);
+    
+    // Add events
+    JsonArray events = schObj.createNestedArray("events");
+    for (int j = 0; j < sch.eventCount; j++) {
+      JsonObject evtObj = events.createNestedObject();
+      Event& evt = sch.events[j];
+      
+      evtObj["id"] = evt.id;
+      evtObj["time"] = utcToLocalTime(evt.time);
+      evtObj["duration"] = evt.duration;
+    }
+  }
+  
+  String response;
+  serializeJson(doc, response);
+  client->text(response);
+}
+
+// Reset the editing session
+void resetSession() {
+  currentSession.sessionId = "";
+  currentSession.lastActivity = 0;
+  currentSession.mode = MODE_VIEW_ONLY;
+  currentSession.editingScheduleIndex = -1;
+  currentSession.isDirty = false;
+}
+
+// Generate a random session ID
+String generateSessionId() {
+  const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  String result = "";
+  
+  for (int i = 0; i < 16; i++) {
+    int index = random(0, strlen(charset));
+    result += charset[index];
+  }
+  
+  return result;
+}
+
+// Send error response to client
+void sendErrorResponse(AsyncWebSocketClient* client, const String& message) {
+  DynamicJsonDocument doc(512);
+  doc["type"] = "error";
+  doc["message"] = message;
+  
+  String response;
+  serializeJson(doc, response);
+  client->text(response);
+}
+
+// Broadcast scheduler update to all connected clients
+void broadcastSchedulerUpdate() {
+  DynamicJsonDocument doc(512);
+  doc["type"] = "data_changed";
+  
+  String response;
+  serializeJson(doc, response);
+  schedulerWs.textAll(response);
+}
+
+// Check for session timeout
+void checkSchedulerTimeouts() {
+  unsigned long currentTime = millis();
+  
+  // Only check periodically to save CPU
+  if (currentTime - lastTimeoutCheck < 10000) return; // Check every 10 seconds
+  
+  lastTimeoutCheck = currentTime;
+  
+  // If there's an active session, check if it has timed out
+  if (currentSession.mode != MODE_VIEW_ONLY && currentSession.lastActivity > 0) {
+    // Handle rollover case
+    unsigned long elapsed = (currentTime >= currentSession.lastActivity) ? 
+                          (currentTime - currentSession.lastActivity) : 
+                          (UINT32_MAX - currentSession.lastActivity + currentTime);
+    
+    if (elapsed > SCHEDULER_TIMEOUT_MS) {
+      debugPrintln("Scheduler editing session timed out");
+      
+      // Reset session
+      resetSession();
+      
+      // Notify all clients
+      DynamicJsonDocument doc(512);
+      doc["type"] = "session_timeout";
+      doc["mode"] = MODE_VIEW_ONLY;
+      
+      String response;
+      serializeJson(doc, response);
+      schedulerWs.textAll(response);
+    }
+  }
+}
+
+// Call this from your main loop or a periodic task
+void updateSchedulerWebSocket() {
+  schedulerWs.cleanupClients();
+  checkSchedulerTimeouts();
 }

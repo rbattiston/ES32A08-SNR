@@ -98,6 +98,10 @@ void testSPIFFSWrite() {
   listSPIFFSFiles();
 }
 
+// Declaration for the scheduler websocket functions
+void initSchedulerWebSocket();
+void updateSchedulerWebSocket();
+
 // Initialize components
 void setup() {
   // Initialize serial for debug output
@@ -191,6 +195,9 @@ void setup() {
     1 // Run on core 1
   );
   
+  // Initialize scheduler WebSockets
+  initSchedulerWebSocket();
+  
   debugPrintln("-------------------------");
   debugPrintf("Connect to WiFi SSID: %s with password: %s\n", getAPSSID(), getAPPassword());
   debugPrintf("Then navigate to http://%s in your browser\n", WiFi.softAPIP().toString().c_str());
@@ -237,6 +244,9 @@ void loop() {
     lastIntegrityCheckTime = currentTime;
     checkHeapIntegrity();
   }
+  
+  // Update scheduler WebSockets (handles timeouts)
+  updateSchedulerWebSocket();
   
   // Efficient delay that allows other tasks to run
   vTaskDelay(pdMS_TO_TICKS(1000));
