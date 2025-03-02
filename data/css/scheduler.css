@@ -1,4 +1,25 @@
-/* scheduler.css */
+/* scheduler.css - Enhanced styles for the redesigned scheduler */
+
+/* Mode-specific section visibility */
+.view-only-section {
+  display: block;
+}
+
+.editor-section {
+  display: none;
+}
+
+/* When in editing/creating mode, hide view-only sections */
+body.editing-mode .view-only-section,
+body.creating-mode .view-only-section {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+body.editing-mode .editor-section,
+body.creating-mode .editor-section {
+  display: block;
+}
 
 /* Active schedules section styles */
 #active-schedules-container {
@@ -14,6 +35,12 @@
   border-radius: 5px;
   padding: 15px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.active-schedule-box:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .active-schedule-box h3 {
@@ -48,8 +75,37 @@
   text-align: right;
 }
 
-/* General styles for the scheduler interface */
-.grid-form {
+/* Schedule details styles */
+.schedule-info-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 15px;
+}
+
+.schedule-info-group {
+  background-color: #f9f9f9;
+  border-radius: 5px;
+  padding: 15px;
+}
+
+.info-row {
+  display: flex;
+  margin-bottom: 8px;
+}
+
+.info-label {
+  font-weight: bold;
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.info-value {
+  flex-grow: 1;
+}
+
+/* General form styles */
+.form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 15px;
@@ -69,10 +125,62 @@
   margin-top: 5px;
 }
 
-/* Schedule selection styles */
-#schedule-dropdown {
-  min-width: 250px;
-  margin-right: 10px;
+/* Timeline styles */
+.timeline-container {
+  position: relative;
+  height: 100px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin: 15px 0;
+  overflow: hidden;
+  background-color: #f5f5f5;
+}
+
+.timeline-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.timeline-bar {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  z-index: 2;
+}
+
+.timeline-event {
+  position: absolute;
+  height: 60%;
+  top: 20%;
+  background-color: rgba(0, 123, 255, 0.6);
+  border: 1px solid #007bff;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.timeline-event:hover {
+  background-color: rgba(0, 123, 255, 0.8);
+}
+
+.tick-mark {
+  position: absolute;
+  top: 5px;
+  color: #666;
+  font-size: 0.7em;
+}
+
+.current-time-line {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 2px;
+  background-color: red;
+  z-index: 10;
 }
 
 /* Event list styles */
@@ -118,87 +226,52 @@
   background-color: #c82333;
 }
 
-/* Timeline styles */
-#timeline-container {
-  position: relative;
-  height: 100px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  margin: 15px 0;
-  overflow: hidden;
+/* Add event form */
+.add-event-form {
+  background-color: #f0f8ff;
+  border-radius: 5px;
+  padding: 15px;
+  margin-top: 15px;
 }
 
-.timeline-event {
-  position: absolute;
-  height: 60%;
-  top: 20%;
-  background-color: rgba(0, 123, 255, 0.6);
-  border: 1px solid #007bff;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.timeline-event:hover {
-  background-color: rgba(0, 123, 255, 0.8);
-}
-
-.tick-mark {
-  color: #666;
-  font-size: 0.7em;
-}
-
-.current-time-line {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  width: 2px;
-  background-color: red;
-  z-index: 10;
-}
-
-/* Button styles */
-.controls {
+/* Editor controls */
+.editor-controls {
+  margin-top: 20px;
   display: flex;
+  justify-content: flex-end;
   gap: 10px;
-  margin: 15px 0;
 }
 
-.btn-primary {
-  background-color: #007bff;
+/* Status message */
+.status-message {
+  padding: 10px 15px;
+  margin-bottom: 15px;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
-.btn-secondary {
-  background-color: #6c757d;
+.status-message.success {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
 }
 
-.btn-success {
-  background-color: #28a745;
+.status-message.error {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
 }
 
-.btn-danger {
-  background-color: #dc3545;
+.status-message.warning {
+  background-color: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeeba;
 }
 
-.btn-primary:hover {
-  background-color: #0069d9;
-}
-
-.btn-secondary:hover {
-  background-color: #5a6268;
-}
-
-.btn-success:hover {
-  background-color: #218838;
-}
-
-.btn-danger:hover {
-  background-color: #c82333;
-}
-
-.disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.status-message.info {
+  background-color: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
 }
 
 /* Modal styles */
@@ -232,7 +305,11 @@
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
-  .grid-form {
+  .schedule-info-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .form-grid {
     grid-template-columns: 1fr;
   }
   
@@ -242,5 +319,10 @@
   
   .controls button {
     width: 100%;
+    margin-bottom: 10px;
+  }
+  
+  #active-schedules-container {
+    grid-template-columns: 1fr;
   }
 }

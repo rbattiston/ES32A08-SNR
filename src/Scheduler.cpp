@@ -406,6 +406,29 @@ void handleLoadSchedulerState(AsyncWebServerRequest *request) {
   doc["scheduleCount"] = schedulerState.scheduleCount;
   doc["currentScheduleIndex"] = schedulerState.currentScheduleIndex;
   
+  // Build relay ownership map
+  uint8_t relayOwnership[8] = {0}; // Which schedule owns which relay (0 = unassigned)
+  for (int i = 0; i < schedulerState.scheduleCount; i++) {
+    Schedule& sch = schedulerState.schedules[i];
+    uint8_t mask = sch.relayMask;
+    
+    for (int relay = 0; relay < 8; relay++) {
+      if (mask & (1 << relay)) {
+        relayOwnership[relay] = i + 1; // Store 1-based index
+      }
+    }
+  }
+  
+  // Add relay ownership information
+  JsonArray relayInfo = doc.createNestedArray("relayAssignments");
+  for (int relay = 0; relay < 8; relay++) {
+    JsonObject relayObj = relayInfo.createNestedObject();
+    relayObj["relay"] = relay;
+    relayObj["assignedToSchedule"] = relayOwnership[relay] - 1; // Convert back to 0-based (-1 means unassigned)
+    relayObj["assignedToScheduleName"] = relayOwnership[relay] > 0 ? 
+      schedulerState.schedules[relayOwnership[relay] - 1].name : "";
+  }
+  
   // Add schedules
   JsonArray schedules = doc.createNestedArray("schedules");
   for (int i = 0; i < schedulerState.scheduleCount; i++) {
@@ -437,6 +460,40 @@ void handleLoadSchedulerState(AsyncWebServerRequest *request) {
   request->send(200, "application/json", response);
 }
 
+// Add this helper function before handleSaveSchedulerState
+
+// Check if relays are already assigned to other schedules
+bool validateRelayAssignments(JsonArray schedules, int currentScheduleIndex) {
+  uint8_t relayAssignmentMap[8] = {0}; // Tracks which schedule owns which relay
+  
+  int scheduleIndex = 0;
+  for (JsonObject schObj : schedules) {
+    uint8_t relayMask = schObj["relayMask"].as<uint8_t>();
+    
+    // Skip the current schedule being edited
+    if (scheduleIndex == currentScheduleIndex) {
+      scheduleIndex++;
+      continue;
+    }
+    
+    // Check each relay in this schedule's mask
+    for (int relay = 0; relay < 8; relay++) {
+      if (relayMask & (1 << relay)) {
+        if (relayAssignmentMap[relay] != 0) {
+          // This relay is already assigned to another schedule
+          debugPrintf("Relay %d is already assigned to schedule %d\n", 
+                     relay, relayAssignmentMap[relay]);
+          return false;
+        }
+        relayAssignmentMap[relay] = scheduleIndex + 1; // Store 1-based index
+      }
+    }
+    scheduleIndex++;
+  }
+  
+  return true;
+}
+
 void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
   static uint8_t *jsonBuffer = NULL;
   static size_t bufferSize = 0;
@@ -452,22 +509,29 @@ void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, siz
       bufferSize = 0;
     }
     
-    // Allocate new buffer for the entire payload
-    jsonBuffer = (uint8_t*)malloc(total);
+    // Allocate new buffer with extra space as safety margin
+    size_t allocSize = total + 64; // Add extra padding
+    jsonBuffer = (uint8_t*)malloc(allocSize);
     if (!jsonBuffer) {
       debugPrintln("Failed to allocate memory for JSON data");
+      debugPrintf("Attempted to allocate: %d bytes\n", allocSize);
+      debugPrintf("Free heap: %d bytes\n", ESP.getFreeHeap());
       request->send(500, "application/json", "{\"status\":\"error\",\"message\":\"Memory allocation failed\"}");
       return;
     }
-    bufferSize = total;
+    bufferSize = allocSize;
+    debugPrintf("Buffer allocated: %d bytes (requested: %d)\n", bufferSize, total);
   }
   
   // Make sure buffer exists and has enough space
   if (!jsonBuffer || bufferSize < index + len) {
     debugPrintln("JSON buffer error or buffer too small");
+    debugPrintf("Buffer size: %d, index: %d, chunk length: %d\n", bufferSize, index, len);
     request->send(500, "application/json", "{\"status\":\"error\",\"message\":\"Buffer error\"}");
-    free(jsonBuffer);
-    jsonBuffer = NULL;
+    if (jsonBuffer) {
+      free(jsonBuffer);
+      jsonBuffer = NULL;
+    }
     bufferSize = 0;
     return;
   }
@@ -481,8 +545,11 @@ void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, siz
   if (index + len == total) {
     debugPrintf("All data received (%d bytes), parsing JSON\n", total);
     
-    // Parse JSON
-    DynamicJsonDocument doc(8192); // Increased buffer size
+    // Add null terminator to treat as string
+    jsonBuffer[total] = 0;
+    
+    // Parse JSON with larger buffer
+    DynamicJsonDocument doc(16384); // Further increased buffer size
     DeserializationError error = deserializeJson(doc, jsonBuffer, total);
     
     // Free the buffer after use
@@ -497,14 +564,69 @@ void handleSaveSchedulerState(AsyncWebServerRequest *request, uint8_t *data, siz
       return;
     }
     
-    // Rest of your existing code to process the parsed JSON...
-    // [...]
+    // Check for relay assignment conflicts
+    JsonArray schedules = doc["schedules"].as<JsonArray>();
+    int currentScheduleIndex = doc["currentScheduleIndex"] | 0;
+
+    if (!validateRelayAssignments(schedules, currentScheduleIndex)) {
+      debugPrintln("ERROR: Relay assignment conflict detected");
+      request->send(400, "application/json", 
+        "{\"status\":\"error\",\"message\":\"One or more relays are already assigned to another schedule\"}");
+      return;
+    }
+
+    // Update scheduler state from JSON
+    schedulerState.scheduleCount = doc["scheduleCount"] | 0;
+    schedulerState.currentScheduleIndex = doc["currentScheduleIndex"] | 0;
+
+    // Clear all schedules first
+    for (int i = 0; i < MAX_SCHEDULES; i++) {
+      schedulerState.schedules[i].eventCount = 0;
+    }
+
+    // Process schedules
+    schedulerState.scheduleCount = 0;
+    for (JsonObject schObj : schedules) {
+      if (schedulerState.scheduleCount >= MAX_SCHEDULES) break;
+      
+      Schedule& sch = schedulerState.schedules[schedulerState.scheduleCount];
+      sch.name = schObj["name"].as<String>();
+      sch.metadata = schObj["metadata"].as<String>();
+      sch.relayMask = schObj["relayMask"].as<uint8_t>();
+      
+      // Convert local times back to UTC for storage
+      sch.lightsOnTime = localTimeToUTC(schObj["lightsOnTime"].as<String>());
+      sch.lightsOffTime = localTimeToUTC(schObj["lightsOffTime"].as<String>());
+      
+      // Process events
+      sch.eventCount = 0;
+      JsonArray events = schObj["events"].as<JsonArray>();
+      for (JsonObject evt : events) {
+        if (sch.eventCount >= MAX_EVENTS) break;
+        
+        Event& e = sch.events[sch.eventCount];
+        e.id = evt["id"].as<String>();
+        // Convert local time back to UTC for storage
+        e.time = localTimeToUTC(evt["time"].as<String>());
+        e.duration = evt["duration"].as<uint16_t>();
+        e.executedMask = 0; // Reset execution flag
+        
+        sch.eventCount++;
+      }
+      
+      schedulerState.scheduleCount++;
+    }
+
+    debugPrintf("Updated scheduler state with %d schedules\n", schedulerState.scheduleCount);
+    
+    // After processing, save to SPIFFS
+    saveSchedulerState();
     
     // Send success response
     request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"Scheduler state saved\"}");
   }
-  // If not all chunks received yet, just return without responding
 }
+
 void handleSchedulerStatus(AsyncWebServerRequest *request) {
   debugPrintln("API request: Scheduler status");
   

@@ -37,11 +37,48 @@ export function updateActiveScheduleFromUI() {
   let relayMask = 0;
   const checkboxes = relayMaskContainer.querySelectorAll("input[type=checkbox]");
   checkboxes.forEach((checkbox, index) => {
+    // Only include the relay if it's checked and either:
+    // 1. Not disabled, or
+    // 2. Already assigned to this schedule (checked but disabled)
     if (checkbox.checked) {
       relayMask |= (1 << index);
     }
   });
   schedule.relayMask = relayMask;
+}
+
+// Check for relay conflicts across all schedules
+function checkRelayConflicts() {
+  // Create array to track which schedule is using each relay
+  const relayUsage = new Array(8).fill(null);
+  const conflicts = [];
+  
+  for (let i = 0; i < schedulerState.scheduleCount; i++) {
+    const schedule = schedulerState.schedules[i];
+    const relayMask = schedule.relayMask;
+    
+    for (let relayIndex = 0; relayIndex < 8; relayIndex++) {
+      if ((relayMask & (1 << relayIndex)) !== 0) {
+        if (relayUsage[relayIndex] === null) {
+          relayUsage[relayIndex] = {
+            scheduleIndex: i,
+            scheduleName: schedule.name
+          };
+        } else {
+          // Conflict detected!
+          conflicts.push({
+            relay: relayIndex + 1,
+            schedules: [
+              relayUsage[relayIndex].scheduleName,
+              schedule.name
+            ]
+          });
+        }
+      }
+    }
+  }
+  
+  return conflicts;
 }
 
 // Load scheduler state from the server
@@ -74,18 +111,54 @@ export async function loadSchedulerState() {
 export async function saveSchedulerState() {
   debugPrintln("Saving scheduler state to server");
   
+  // Add visual feedback during saving
+  const saveButton = document.getElementById("save-schedule");
+  if (saveButton) {
+    const originalText = saveButton.textContent;
+    saveButton.textContent = "Saving...";
+    saveButton.disabled = true;
+  }
+  
+  // Create status message container if it doesn't exist
+  let statusMessage = document.getElementById("schedule-status-message");
+  if (!statusMessage) {
+    statusMessage = document.createElement("div");
+    statusMessage.id = "schedule-status-message";
+    statusMessage.style.padding = "10px";
+    statusMessage.style.margin = "10px 0";
+    statusMessage.style.borderRadius = "4px";
+    statusMessage.style.display = "none";
+    
+    // Insert after the controls section
+    const controlsSection = document.getElementById("scheduler-controls");
+    if (controlsSection) {
+      controlsSection.parentNode.insertBefore(statusMessage, controlsSection.nextSibling);
+    }
+  }
+  
+  // Hide status message initially
+  statusMessage.style.display = "none";
+  
   // Update the active schedule with UI values first
   updateActiveScheduleFromUI();
   
-  // Log event IDs for debugging
-  for (let i = 0; i < schedulerState.scheduleCount; i++) {
-    const schedule = schedulerState.schedules[i];
-    if (schedule.events && schedule.events.length > 0) {
-      console.log(`Schedule ${i} (${schedule.name}) has ${schedule.events.length} events:`);
-      schedule.events.forEach((event, idx) => {
-        console.log(`  Event ${idx}: ID=${event.id}, Time=${event.time}, Duration=${event.duration}`);
-      });
-    }
+  // Check for conflicts
+  const conflicts = checkRelayConflicts();
+  if (conflicts.length > 0) {
+    // Format the warning message
+    let warningMsg = "Warning: Some relays are assigned to multiple schedules:\n";
+    conflicts.forEach(conflict => {
+      warningMsg += `- Relay ${conflict.relay} is used by both "${conflict.schedules[0]}" and "${conflict.schedules[1]}"\n`;
+    });
+    
+    statusMessage.textContent = warningMsg;
+    statusMessage.style.backgroundColor = "#fff3cd";
+    statusMessage.style.color = "#856404";
+    statusMessage.style.borderLeft = "5px solid #ffc107";
+    statusMessage.style.display = "block";
+    statusMessage.style.whiteSpace = "pre-line";
+    
+    console.warn(warningMsg);
   }
 
   // Ensure consistent events array and eventCount
@@ -101,16 +174,15 @@ export async function saveSchedulerState() {
     schedule.eventCount = schedule.events.length;
   }
   
-   // INSERT YOUR NEW CODE HERE:
   const jsonData = JSON.stringify(schedulerState);
   console.log(`Sending data to server (${jsonData.length} bytes):`);
-  console.log(jsonData.substring(0, 200) + '...'); // Show just the first 200 chars to avoid flooding the console
+  console.log(jsonData.substring(0, 200) + '...'); // Show just the first 200 chars
    
   try {
     const response = await fetch("/api/scheduler/save", {
        method: "POST",
        headers: { "Content-Type": "application/json" },
-       body: jsonData  // Use the jsonData variable instead of JSON.stringify(schedulerState)
+       body: jsonData
     });
     
     if (!response.ok) {
@@ -125,11 +197,41 @@ export async function saveSchedulerState() {
     renderTimeline();
     renderActiveSchedules();
     
-    alert("Schedule saved successfully");
+    // Show success message
+    statusMessage.textContent = "Schedule saved successfully!";
+    statusMessage.style.backgroundColor = "#d4edda";
+    statusMessage.style.color = "#155724";
+    statusMessage.style.borderLeft = "5px solid #28a745";
+    statusMessage.style.display = "block";
+    
+    // Reset button state
+    if (saveButton) {
+      saveButton.textContent = "Save Schedule";
+      saveButton.disabled = false;
+    }
+    
+    // Hide success message after 5 seconds
+    setTimeout(() => {
+      statusMessage.style.display = "none";
+    }, 5000);
+    
     return true;
   } catch (error) {
     console.error("Error saving scheduler state:", error);
-    alert("Failed to save schedule: " + error.message);
+    
+    // Show error message
+    statusMessage.textContent = "Failed to save schedule: " + error.message;
+    statusMessage.style.backgroundColor = "#f8d7da";
+    statusMessage.style.color = "#721c24";
+    statusMessage.style.borderLeft = "5px solid #dc3545";
+    statusMessage.style.display = "block";
+    
+    // Reset button state
+    if (saveButton) {
+      saveButton.textContent = "Save Schedule";
+      saveButton.disabled = false;
+    }
+    
     return false;
   }
 }

@@ -1,25 +1,13 @@
 /**
  * Event-related UI functions for the scheduler
  */
-
-let updateCurrentTimeLine = () => {
-  console.log("Timeline update function not loaded yet");
-};
-
-//import { updateCurrentTimeLine } from './timeline';
 import { MAX_EVENTS, debugPrintln } from '../constants';
-import { schedulerState, saveSchedulerState } from '../state';
-
-
-import('./timeline').then(timeline => {
-  updateCurrentTimeLine = timeline.updateCurrentTimeLine;
-  timeline.startTimelineUpdates();
-});
+import { schedulerState, SchedulerMode, updateActiveScheduleFromUI, addEvent as addEventToSchedule, deleteEvent as deleteEventFromSchedule, storePendingSchedule } from '../state';
 
 // Variables for event editing modal
 let currentEditingIndex = null;
 
-// Render the event list for the active schedule
+// Render the event list for the currently active or pending schedule
 export function renderEventList() {
   debugPrintln("Rendering event list");
   
@@ -30,13 +18,18 @@ export function renderEventList() {
     return;
   }
   
-  if (schedulerState.scheduleCount === 0) {
+  // Determine which schedule to show events for
+  const schedule = schedulerState.mode !== SchedulerMode.VIEW_ONLY && schedulerState.pendingSchedule
+    ? schedulerState.pendingSchedule
+    : (schedulerState.scheduleCount > 0 ? schedulerState.schedules[schedulerState.currentScheduleIndex] : null);
+  
+  // Clear the list
+  eventList.innerHTML = "";
+  
+  if (!schedule) {
     eventList.innerHTML = "<p>No schedules available</p>";
     return;
   }
-  
-  const schedule = schedulerState.schedules[schedulerState.currentScheduleIndex];
-  eventList.innerHTML = "";
   
   // Initialize events array if it doesn't exist
   if (!schedule.events) {
@@ -64,28 +57,33 @@ export function renderEventList() {
     
     eventItem.innerHTML = `
       <span>${event.time} - Duration: ${durationText}</span>
-      <button data-index="${index}" class="delete-event">Delete</button>
+      ${schedulerState.mode !== SchedulerMode.VIEW_ONLY ? 
+        `<button data-index="${index}" class="delete-event">Delete</button>` : ''}
     `;
     
-    // Add click event to edit the event
-    eventItem.addEventListener("click", () => openEditModal(index));
+    // Add click event to edit the event (only in edit/create mode)
+    if (schedulerState.mode !== SchedulerMode.VIEW_ONLY) {
+      eventItem.addEventListener("click", () => openEditModal(index));
+    }
     
     // Add event to the list
     eventList.appendChild(eventItem);
   });
   
   // Add event listeners to delete buttons
-  const deleteButtons = eventList.querySelectorAll(".delete-event");
-  deleteButtons.forEach(button => {
-    button.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const index = parseInt(button.getAttribute("data-index"));
-      deleteEvent(index);
+  if (schedulerState.mode !== SchedulerMode.VIEW_ONLY) {
+    const deleteButtons = eventList.querySelectorAll(".delete-event");
+    deleteButtons.forEach(button => {
+      button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const index = parseInt(button.getAttribute("data-index"));
+        deleteEventFromSchedule(index);
+      });
     });
-  });
+  }
 }
 
-// Render the timeline visualization for the active schedule
+// Render the timeline visualization
 export function renderTimeline() {
   debugPrintln("Rendering timeline");
   
@@ -96,13 +94,18 @@ export function renderTimeline() {
     return;
   }
   
-  if (schedulerState.scheduleCount === 0) {
+  // Determine which schedule to show
+  const schedule = schedulerState.mode !== SchedulerMode.VIEW_ONLY && schedulerState.pendingSchedule
+    ? schedulerState.pendingSchedule
+    : (schedulerState.scheduleCount > 0 ? schedulerState.schedules[schedulerState.currentScheduleIndex] : null);
+  
+  // Clear the container
+  timelineContainer.innerHTML = "";
+  
+  if (!schedule) {
     timelineContainer.innerHTML = "<p>No schedules available</p>";
     return;
   }
-  
-  const schedule = schedulerState.schedules[schedulerState.currentScheduleIndex];
-  timelineContainer.innerHTML = "";
   
   // Initialize events array if it doesn't exist
   if (!schedule.events) {
@@ -130,7 +133,7 @@ export function renderTimeline() {
       lightgrey ${(offMinutes/1440)*100}%, 
       lightgrey 100%)`;
   } else {
-    // Handle case where "on" time is after "off" time
+    // Handle case where "on" time is after "off" time (overnight)
     bgDiv.style.background = `linear-gradient(to right, 
       lightyellow 0%, 
       lightyellow ${(offMinutes/1440)*100}%, 
@@ -156,7 +159,7 @@ export function renderTimeline() {
   timelineBar.style.width = "100%";
   timelineBar.style.zIndex = "5";
   
-  // Add time markers
+  // Add time markers every 2 hours
   for (let hour = 0; hour < 24; hour += 2) {
     const marker = document.createElement("div");
     marker.className = "tick-mark";
@@ -186,11 +189,13 @@ export function renderTimeline() {
       eventBlock.style.width = `${widthPercent}%`;
       eventBlock.title = `Event: ${event.time} - ${event.duration}s`;
       
-      // Add click handler to edit event
-      eventBlock.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openEditModal(index);
-      });
+      // Add click handler to edit event (only in edit/create mode)
+      if (schedulerState.mode !== SchedulerMode.VIEW_ONLY) {
+        eventBlock.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openEditModal(index);
+        });
+      }
       
       timelineBar.appendChild(eventBlock);
     });
@@ -203,7 +208,7 @@ export function renderTimeline() {
 }
 
 // Update the current time line on the timeline
-/*export function updateCurrentTimeLine() {
+export function updateCurrentTimeLine() {
   const timelineContainer = document.getElementById("timeline-container");
   if (!timelineContainer) return;
   
@@ -230,26 +235,30 @@ export function renderTimeline() {
   currentLine.style.left = `${leftPercent}%`;
   
   timelineContainer.appendChild(currentLine);
-}*/
+}
 
-// Add a new event to the active schedule
-export function addEvent() {
-  debugPrintln("Adding new event");
+// Start periodic updates of the current time line
+export function startTimelineUpdates() {
+  // Initial update
+  updateCurrentTimeLine();
+  
+  // Periodic updates every minute
+  setInterval(updateCurrentTimeLine, 60000);
+}
+
+// Handle the add event button click
+export function handleAddEvent() {
+  debugPrintln("Handling add event button click");
+  
+  if (schedulerState.mode === SchedulerMode.VIEW_ONLY) {
+    debugPrintln("Cannot add events in view-only mode");
+    return;
+  }
   
   const eventTimeInput = document.getElementById("event-time");
   const eventDurationInput = document.getElementById("event-duration");
   const eventRepeatInput = document.getElementById("event-repeat");
   const eventRepeatIntervalInput = document.getElementById("event-repeat-interval");
-  
-  if (schedulerState.scheduleCount === 0) {
-    alert("Please create a schedule first");
-    return;
-  }
-  
-  const schedule = schedulerState.schedules[schedulerState.currentScheduleIndex];
-  
-  // Debugging - log current events count
-  debugPrintln(`Current event count: ${schedule.eventCount}, events array length: ${schedule.events.length}`);
   
   // Get values from form
   const eventTime = eventTimeInput.value;
@@ -278,110 +287,47 @@ export function addEvent() {
     return;
   }
   
-  // Initialize events array if it doesn't exist
-  if (!schedule.events) {
-    schedule.events = [];
-    schedule.eventCount = 0;
-  }
-  
-  // Parse base time
-  const [baseHour, baseMinute] = eventTime.split(":").map(Number);
-  let baseMinutes = baseHour * 60 + baseMinute;
-  
-  // Calculate total events we'll be adding
-  const totalEventsToAdd = repeatCount + 1;
-  
-  // Check if adding these events would exceed the maximum
-  if (schedule.eventCount + totalEventsToAdd > MAX_EVENTS) {
-    alert(`Cannot add ${totalEventsToAdd} events. Would exceed maximum of ${MAX_EVENTS} events.`);
-    return;
-  }
-  
-  // Create events for each occurrence
-  let eventsAdded = 0;
-  for (let i = 0; i <= repeatCount; i++) {
-    // Calculate time for this occurrence
-    const occurrenceMinutes = baseMinutes + (i * repeatInterval);
-    
-    // Skip if beyond 24 hours
-    if (occurrenceMinutes >= 1440) {
-      break;
-    }
-    
-    const occurrenceHour = Math.floor(occurrenceMinutes / 60);
-    const occurrenceMinute = occurrenceMinutes % 60;
-    const occurrenceTime = `${occurrenceHour.toString().padStart(2, "0")}:${occurrenceMinute.toString().padStart(2, "0")}`;
-    
-    // Generate the event ID
-    const eventId = Date.now().toString() + "_" + i;
-    
-    // Log the event ID
-    console.log(`Creating event with ID: ${eventId}, time: ${occurrenceTime}, duration: ${duration}`);
-
-    // Create new event
-    const newEvent = {
-      id: Date.now().toString() + "_" + i,
-      time: occurrenceTime,
-      duration: duration,
-      executedMask: 0
-    };
-    
-    // Add to schedule
-    schedule.events.push(newEvent);
-    eventsAdded++;
-  }
-  
-  // Update event count
-  schedule.eventCount = schedule.events.length;
-  
-  debugPrintln(`Added ${eventsAdded} events. New count: ${schedule.eventCount}`);
-  
-  // Update UI
-  renderEventList();
-  renderTimeline();
-  
-  // Save changes
-  saveSchedulerState();
+  // Add the event(s)
+  addEventToSchedule(eventTime, duration, repeatCount, repeatInterval);
 }
 
-// Delete an event from the active schedule
-export function deleteEvent(index) {
-  debugPrintln(`Deleting event at index ${index}`);
+// Open edit modal for an event
+export function openEditModal(index) {
+  debugPrintln(`Opening edit modal for event ${index}`);
   
-  if (schedulerState.scheduleCount === 0) {
+  if (schedulerState.mode === SchedulerMode.VIEW_ONLY) {
+    debugPrintln("Cannot edit events in view-only mode");
     return;
   }
   
-  const schedule = schedulerState.schedules[schedulerState.currentScheduleIndex];
+  // Get the current schedule
+  const schedule = schedulerState.pendingSchedule || 
+                  (schedulerState.scheduleCount > 0 ? 
+                   schedulerState.schedules[schedulerState.currentScheduleIndex] : null);
   
-  // Initialize events array if it doesn't exist
-  if (!schedule.events) {
-    schedule.events = [];
-    schedule.eventCount = 0;
+  if (!schedule || !schedule.events || index >= schedule.events.length) {
+    debugPrintln("Invalid schedule or event index");
     return;
   }
   
-  if (index < 0 || index >= schedule.events.length) {
-    debugPrintln(`Invalid event index: ${index}`);
-    return;
-  }
+  const event = schedule.events[index];
+  currentEditingIndex = index;
   
-  // Remove the event
-  schedule.events.splice(index, 1);
-  schedule.eventCount = schedule.events.length;
+  // Populate time selects
+  populateTimeSelects();
   
-  debugPrintln(`Event deleted. New count: ${schedule.eventCount}`);
+  // Set current values
+  const [hourStr, minuteStr] = event.time.split(":");
+  document.getElementById("edit-hour").value = parseInt(hourStr);
+  document.getElementById("edit-minute").value = parseInt(minuteStr);
+  document.getElementById("edit-duration").value = event.duration;
   
-  // Update UI
-  renderEventList();
-  renderTimeline();
-  
-  // Save changes
-  saveSchedulerState();
+  // Show modal
+  document.getElementById("edit-modal").style.display = "block";
 }
 
-// Populate time selects
-export function populateTimeSelects() {
+// Populate hour and minute selects in the edit modal
+function populateTimeSelects() {
   const hourSelect = document.getElementById("edit-hour");
   const minuteSelect = document.getElementById("edit-minute");
   
@@ -405,27 +351,6 @@ export function populateTimeSelects() {
   }
 }
 
-// Open edit modal for an event
-export function openEditModal(index) {
-  debugPrintln(`Opening edit modal for event ${index}`);
-  
-  const schedule = schedulerState.schedules[schedulerState.currentScheduleIndex];
-  const event = schedule.events[index];
-  let currentEditingIndex = index;
-  
-  // Populate time selects
-  populateTimeSelects();
-  
-  // Set current values
-  const [hourStr, minuteStr] = event.time.split(":");
-  document.getElementById("edit-hour").value = parseInt(hourStr);
-  document.getElementById("edit-minute").value = parseInt(minuteStr);
-  document.getElementById("edit-duration").value = event.duration;
-  
-  // Show modal
-  document.getElementById("edit-modal").style.display = "block";
-}
-
 // Close edit modal
 export function closeEditModal() {
   document.getElementById("edit-modal").style.display = "none";
@@ -436,12 +361,22 @@ export function closeEditModal() {
 export function saveEditModal() {
   debugPrintln("Saving changes from edit modal");
   
-  if (currentEditingIndex === null) {
+  if (currentEditingIndex === null || schedulerState.mode === SchedulerMode.VIEW_ONLY) {
     closeEditModal();
     return;
   }
   
-  const schedule = schedulerState.schedules[schedulerState.currentScheduleIndex];
+  // Get the current schedule
+  const schedule = schedulerState.pendingSchedule || 
+                  (schedulerState.scheduleCount > 0 ? 
+                   schedulerState.schedules[schedulerState.currentScheduleIndex] : null);
+  
+  if (!schedule || !schedule.events || currentEditingIndex >= schedule.events.length) {
+    debugPrintln("Invalid schedule or event index");
+    closeEditModal();
+    return;
+  }
+  
   const event = schedule.events[currentEditingIndex];
   
   // Get new values
@@ -457,20 +392,26 @@ export function saveEditModal() {
   renderEventList();
   renderTimeline();
   
-  // Save changes
-  saveSchedulerState();
+  // If in edit/create mode, update pending schedule
+  if (schedulerState.mode !== SchedulerMode.VIEW_ONLY) {
+    schedulerState.pendingSchedule = schedule;
+    storePendingSchedule();
+  }
   
   // Close modal
   closeEditModal();
 }
 
-// Initialize event listeners for the modal
+// Initialize modal event listeners
 export function initModalListeners() {
-  document.getElementById("modal-save").addEventListener("click", saveEditModal);
-  document.getElementById("modal-cancel").addEventListener("click", closeEditModal);
-}
-
-// Update current time line periodically
-export function startTimelineUpdates() {
-  setInterval(updateCurrentTimeLine, 60000); // Update every minute
+  const saveButton = document.getElementById("modal-save");
+  const cancelButton = document.getElementById("modal-cancel");
+  
+  if (saveButton) {
+    saveButton.addEventListener("click", saveEditModal);
+  }
+  
+  if (cancelButton) {
+    cancelButton.addEventListener("click", closeEditModal);
+  }
 }
