@@ -96,35 +96,69 @@ export function storePendingSchedule() {
 let websocket = null;
 
 export function initWebSocket() {
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${wsProtocol}//${window.location.host}/ws/scheduler`;
-  
-  websocket = new WebSocket(wsUrl);
-  
-  websocket.onopen = function(evt) {
-    debugPrintln("WebSocket connection established");
-  };
-  
-  websocket.onclose = function(evt) {
-    debugPrintln("WebSocket connection closed");
-    // Try to reconnect after a delay
-    setTimeout(initWebSocket, 2000);
-  };
-  
-  websocket.onmessage = function(evt) {
-    const message = JSON.parse(evt.data);
-    handleWebSocketMessage(message);
-  };
-  
-  websocket.onerror = function(evt) {
-    debugPrintln("WebSocket error: " + evt.data);
-  };
+  try {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/scheduler`;
+    
+    debugPrintln(`Attempting to connect to WebSocket at ${wsUrl}`);
+    
+    // Only create WebSocket if supported by browser
+    if ('WebSocket' in window) {
+      const websocket = new WebSocket(wsUrl);
+      
+      websocket.onopen = function(evt) {
+        debugPrintln("WebSocket connection established");
+      };
+      
+      websocket.onclose = function(evt) {
+        debugPrintln("WebSocket connection closed");
+        // Try to reconnect after a delay, but don't keep trying indefinitely
+        // We'll limit retries to prevent browser slowdowns
+        if (window.wsRetryCount === undefined) {
+          window.wsRetryCount = 0;
+        }
+        
+        if (window.wsRetryCount < 3) {
+          window.wsRetryCount++;
+          debugPrintln(`WebSocket retry attempt ${window.wsRetryCount}`);
+          setTimeout(initWebSocket, 5000); // Longer delay between retries
+        } else {
+          debugPrintln("Max WebSocket retry attempts reached, giving up");
+        }
+      };
+      
+      websocket.onmessage = function(evt) {
+        try {
+          const message = JSON.parse(evt.data);
+          handleWebSocketMessage(message);
+        } catch (e) {
+          debugPrintln(`Error parsing WebSocket message: ${e.message}`);
+        }
+      };
+      
+      websocket.onerror = function(evt) {
+        debugPrintln(`WebSocket error: ${evt.data || 'Unknown error'}`);
+      };
+      
+      // Store the websocket reference
+      window.schedulerWebSocket = websocket;
+    } else {
+      debugPrintln("WebSocket not supported by browser");
+    }
+  } catch (e) {
+    debugPrintln(`Error initializing WebSocket: ${e.message}`);
+  }
 }
 
-// Send a message via WebSocket
+
+// Safe version of sendWebSocketMessage
 export function sendWebSocketMessage(message) {
-  if (websocket && websocket.readyState === WebSocket.OPEN) {
-    websocket.send(JSON.stringify(message));
+  if (window.schedulerWebSocket && window.schedulerWebSocket.readyState === WebSocket.OPEN) {
+    try {
+      window.schedulerWebSocket.send(JSON.stringify(message));
+    } catch (e) {
+      debugPrintln(`Error sending WebSocket message: ${e.message}`);
+    }
   } else {
     debugPrintln("WebSocket not connected, cannot send message");
   }

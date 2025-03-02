@@ -27,18 +27,33 @@ export async function updateSchedulerStatus() {
   try {
     const status = await getSchedulerStatus();
     
+    // Only update UI if both buttons exist
     if (activateButton && deactivateButton) {
       if (status.isActive) {
         activateButton.disabled = true;
         deactivateButton.disabled = false;
-        activateButton.classList.add("disabled");
-        deactivateButton.classList.remove("disabled");
+        
+        // Add null checks before accessing classList
+        if (activateButton.classList) {
+          activateButton.classList.add("disabled");
+        }
+        if (deactivateButton.classList) {
+          deactivateButton.classList.remove("disabled");
+        }
       } else {
         activateButton.disabled = false;
         deactivateButton.disabled = true;
-        activateButton.classList.remove("disabled");
-        deactivateButton.classList.add("disabled");
+        
+        // Add null checks before accessing classList
+        if (activateButton.classList) {
+          activateButton.classList.remove("disabled");
+        }
+        if (deactivateButton.classList) {
+          deactivateButton.classList.add("disabled");
+        }
       }
+    } else {
+      debugPrintln("Scheduler buttons not found in DOM, skipping UI update");
     }
     
     return status;
