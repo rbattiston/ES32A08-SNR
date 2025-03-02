@@ -24,23 +24,34 @@ export async function updateSchedulerStatus() {
   const activateButton = document.getElementById("activate-scheduler");
   const deactivateButton = document.getElementById("deactivate-scheduler");
   
-  const status = await getSchedulerStatus();
-  
-  if (status.isActive) {
-    activateButton.disabled = true;
-    deactivateButton.disabled = false;
-    activateButton.classList.add("disabled");
-    deactivateButton.classList.remove("disabled");
-  } else {
-    activateButton.disabled = false;
-    deactivateButton.disabled = true;
-    activateButton.classList.remove("disabled");
-    deactivateButton.classList.add("disabled");
+  try {
+    const status = await getSchedulerStatus();
+    
+    if (activateButton && deactivateButton) {
+      if (status.isActive) {
+        activateButton.disabled = true;
+        deactivateButton.disabled = false;
+        activateButton.classList.add("disabled");
+        deactivateButton.classList.remove("disabled");
+      } else {
+        activateButton.disabled = false;
+        deactivateButton.disabled = true;
+        activateButton.classList.remove("disabled");
+        deactivateButton.classList.add("disabled");
+      }
+    }
+    
+    return status;
+  } catch (error) {
+    console.error("Error updating scheduler status:", error);
+    return { isActive: false };
   }
 }
 
 // Activate the scheduler
 export async function activateScheduler() {
+  debugPrintln("Activating scheduler");
+  
   try {
     const response = await fetch("/api/scheduler/activate", { method: "POST" });
     if (!response.ok) {
@@ -57,6 +68,8 @@ export async function activateScheduler() {
 
 // Deactivate the scheduler
 export async function deactivateScheduler() {
+  debugPrintln("Deactivating scheduler");
+  
   try {
     const response = await fetch("/api/scheduler/deactivate", { method: "POST" });
     if (!response.ok) {

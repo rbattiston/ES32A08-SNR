@@ -2,7 +2,7 @@
  * Active schedules UI for the scheduler
  */
 import { debugPrintln } from '../constants';
-import { schedulerState } from '../state';
+import { schedulerState } from '../state-model';
 
 // Render the active schedules section
 export function renderActiveSchedules() {
@@ -105,4 +105,68 @@ export function renderActiveSchedules() {
   if (activeCount === 0) {
     activeSchedulesContainer.innerHTML = "<p>No active schedules. Create a schedule and assign relays to make it active.</p>";
   }
+}
+
+// Populate the schedule dropdown
+export function populateScheduleDropdown() {
+  debugPrintln("Populating schedule dropdown");
+  
+  const dropdown = document.getElementById("schedule-dropdown");
+  if (!dropdown) {
+    debugPrintln("Schedule dropdown not found");
+    return;
+  }
+  
+  // Clear existing options
+  dropdown.innerHTML = "";
+  
+  // Check if there are any schedules
+  if (schedulerState.scheduleCount === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No schedules available";
+    option.disabled = true;
+    option.selected = true;
+    dropdown.appendChild(option);
+    return;
+  }
+  
+  // Add each schedule as an option
+  for (let i = 0; i < schedulerState.scheduleCount; i++) {
+    const schedule = schedulerState.schedules[i];
+    const option = document.createElement("option");
+    option.value = i;
+    option.textContent = schedule.name;
+    
+    // Mark active schedules
+    if (schedule.relayMask > 0) {
+      option.textContent += " (Active)";
+    }
+    
+    dropdown.appendChild(option);
+  }
+  
+  // Set current selection
+  dropdown.value = schedulerState.currentScheduleIndex;
+}
+
+// Handle schedule change from dropdown
+export function handleScheduleChange(event) {
+  const selectedIndex = parseInt(event.target.value);
+  
+  debugPrintln(`Schedule changed to index ${selectedIndex}`);
+  
+  if (schedulerState.mode !== "view-only") {
+    debugPrintln("Cannot change schedule in edit/create mode");
+    // Revert to previous selection
+    event.target.value = schedulerState.currentScheduleIndex;
+    return;
+  }
+  
+  // Update current schedule index
+  schedulerState.currentScheduleIndex = selectedIndex;
+  
+  // Trigger schedule selection event
+  const selectionEvent = new CustomEvent('scheduleSelected', { detail: { index: selectedIndex } });
+  document.dispatchEvent(selectionEvent);
 }

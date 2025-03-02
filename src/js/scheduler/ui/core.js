@@ -4,7 +4,6 @@
 import { debugPrintln } from '../constants';
 import { 
   schedulerState, 
-  SchedulerMode,
   loadSchedulerState,
   updateActiveScheduleFromUI,
   checkPendingSchedule,
@@ -13,9 +12,10 @@ import {
   saveSchedulerState,
   cancelEditCreateMode,
   startCreateMode
-} from '../state';
+} from '../state-model';
 import { renderEventList, renderTimeline, initModalListeners, handleAddEvent } from './events';
 import { renderActiveSchedules, populateScheduleDropdown, handleScheduleChange } from './active-schedules';
+import { activateScheduler, deactivateScheduler, updateSchedulerStatus } from '../api';
 
 // Initialize UI references and set up event listeners
 export function initUI() {
@@ -95,7 +95,7 @@ export function initUI() {
   
   // Listen for beforeunload to warn about unsaved changes
   window.addEventListener("beforeunload", (event) => {
-    if (schedulerState.mode !== SchedulerMode.VIEW_ONLY) {
+    if (schedulerState.mode !== "view-only") {
       const message = "You have unsaved schedule changes. Are you sure you want to leave?";
       event.returnValue = message;
       return message;
@@ -134,7 +134,7 @@ export async function initScheduler() {
 function handleScheduleSelection(event) {
   debugPrintln("Schedule selected event received");
   
-  if (schedulerState.mode !== SchedulerMode.VIEW_ONLY) {
+  if (schedulerState.mode !== "view-only") {
     debugPrintln("Cannot change selection in edit/create mode");
     return;
   }
@@ -150,13 +150,13 @@ function validateScheduleName(event) {
   // Empty name check
   if (!newName) {
     alert("Schedule name cannot be empty");
-    event.target.value = schedulerState.pendingSchedule.name || "New Schedule";
+    event.target.value = schedulerState.pendingSchedule?.name || "New Schedule";
     return;
   }
   
   // Check for duplicates (only in create mode or if name has changed in edit mode)
-  if (schedulerState.mode === SchedulerMode.CREATING ||
-      (schedulerState.mode === SchedulerMode.EDITING && 
+  if (schedulerState.mode === "creating" ||
+      (schedulerState.mode === "editing" && 
        newName !== schedulerState.schedules[schedulerState.currentScheduleIndex].name)) {
     
     const isDuplicate = schedulerState.schedules.some(s => s.name === newName);
@@ -164,8 +164,8 @@ function validateScheduleName(event) {
     if (isDuplicate) {
       alert(`A schedule with the name "${newName}" already exists. Please choose a different name.`);
       // Restore the original name
-      if (schedulerState.mode === SchedulerMode.CREATING) {
-        event.target.value = schedulerState.pendingSchedule.name || "New Schedule";
+      if (schedulerState.mode === "creating") {
+        event.target.value = schedulerState.pendingSchedule?.name || "New Schedule";
       } else {
         event.target.value = schedulerState.schedules[schedulerState.currentScheduleIndex].name;
       }
@@ -193,82 +193,6 @@ function handleLightsTimeChange(event) {
 function handleRelayCheckboxChange(event) {
   // Update the pending schedule
   updateActiveScheduleFromUI();
-}
-
-// Activate the scheduler
-async function activateScheduler() {
-  debugPrintln("Activating scheduler");
-  
-  try {
-    const response = await fetch("/api/scheduler/activate", { method: "POST" });
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    
-    await updateSchedulerStatus();
-    alert("Scheduler activated");
-  } catch (error) {
-    console.error("Error activating scheduler:", error);
-    alert("Failed to activate scheduler: " + error.message);
-  }
-}
-
-// Deactivate the scheduler
-async function deactivateScheduler() {
-  debugPrintln("Deactivating scheduler");
-  
-  try {
-    const response = await fetch("/api/scheduler/deactivate", { method: "POST" });
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    
-    await updateSchedulerStatus();
-    alert("Scheduler deactivated");
-  } catch (error) {
-    console.error("Error deactivating scheduler:", error);
-    alert("Failed to deactivate scheduler: " + error.message);
-  }
-}
-
-// Get the scheduler status and update UI
-export async function updateSchedulerStatus() {
-  debugPrintln("Updating scheduler status");
-  
-  try {
-    const response = await fetch("/api/scheduler/status");
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    updateSchedulerStatusUI(data.isActive);
-    
-    return data;
-  } catch (error) {
-    console.error("Error getting scheduler status:", error);
-    return { isActive: false };
-  }
-}
-
-// Update scheduler status UI elements
-function updateSchedulerStatusUI(isActive) {
-  const activateButton = document.getElementById("activate-scheduler");
-  const deactivateButton = document.getElementById("deactivate-scheduler");
-  
-  if (activateButton && deactivateButton) {
-    if (isActive) {
-      activateButton.disabled = true;
-      deactivateButton.disabled = false;
-      activateButton.classList.add("disabled");
-      deactivateButton.classList.remove("disabled");
-    } else {
-      activateButton.disabled = false;
-      deactivateButton.disabled = true;
-      activateButton.classList.remove("disabled");
-      deactivateButton.classList.add("disabled");
-    }
-  }
 }
 
 // Update all UI components that show schedule information

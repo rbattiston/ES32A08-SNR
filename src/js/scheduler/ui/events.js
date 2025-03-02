@@ -2,7 +2,19 @@
  * Event-related UI functions for the scheduler
  */
 import { MAX_EVENTS, debugPrintln } from '../constants';
-import { schedulerState, SchedulerMode, updateActiveScheduleFromUI, addEvent as addEventToSchedule, deleteEvent as deleteEventFromSchedule, storePendingSchedule } from '../state';
+import { 
+  schedulerState, 
+  addEvent as addEventToSchedule, 
+  deleteEvent as deleteEventFromSchedule, 
+  storePendingSchedule 
+} from '../state-model';
+
+// Define SchedulerMode here since it's not being exported from state-model
+const SchedulerMode = {
+  VIEW_ONLY: 'view-only',
+  CREATING: 'creating',
+  EDITING: 'editing'
+};
 
 // Variables for event editing modal
 let currentEditingIndex = null;

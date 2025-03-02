@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const IrrigationScheduler = () => {
   // Application state
@@ -328,7 +328,6 @@ const IrrigationScheduler = () => {
     
     return (
       <div className="w-full h-16 relative border border-gray-300 rounded overflow-hidden bg-gray-100">
-        {/* Lights period background */}
         <div 
           className="absolute h-full bg-yellow-100" 
           style={{ 
@@ -338,7 +337,6 @@ const IrrigationScheduler = () => {
           }}
         ></div>
         
-        {/* Hour markers */}
         {Array.from({ length: 13 }).map((_, i) => (
           <div 
             key={i} 
@@ -349,7 +347,6 @@ const IrrigationScheduler = () => {
           </div>
         ))}
         
-        {/* Events */}
         {events.map(event => {
           const eventPercent = timeToPercent(event.time);
           const widthPercent = Math.max(0.5, Math.min(5, (event.duration / 86400) * 100));
@@ -364,7 +361,6 @@ const IrrigationScheduler = () => {
           );
         })}
         
-        {/* Current time indicator */}
         <CurrentTimeLine />
       </div>
     );
@@ -401,7 +397,6 @@ const IrrigationScheduler = () => {
     <div className="max-w-6xl mx-auto px-4 py-6">
       <h1 className="text-2xl font-bold text-blue-800 mb-6">Irrigation Scheduler</h1>
       
-      {/* Status message */}
       {statusMessage.text && (
         <div className={`mb-4 p-3 rounded ${statusMessage.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
           {statusMessage.text}
@@ -415,7 +410,6 @@ const IrrigationScheduler = () => {
         </div>
       ) : (
         <>
-          {/* Active Schedules Section - Always visible */}
           <section className={`mb-8 ${mode !== 'view' ? 'opacity-50 pointer-events-none' : ''}`}>
             <h2 className="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Active Schedules</h2>
             
@@ -465,7 +459,6 @@ const IrrigationScheduler = () => {
             )}
           </section>
           
-          {/* Schedule Selection - Visible only in view mode */}
           {mode === 'view' && (
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Select Schedule</h2>
@@ -510,7 +503,6 @@ const IrrigationScheduler = () => {
             </section>
           )}
           
-          {/* Schedule Editor - Visible in edit and create modes */}
           {(mode === 'editing' || mode === 'creating') && (
             <section className="mb-8 bg-white rounded-lg shadow-md p-6">
               <h2 className="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">
@@ -518,7 +510,6 @@ const IrrigationScheduler = () => {
               </h2>
               
               <div className="space-y-6">
-                {/* Basic settings */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-gray-700 mb-2">Schedule Name</label>
@@ -555,7 +546,6 @@ const IrrigationScheduler = () => {
                   </div>
                 </div>
                 
-                {/* Relay selection */}
                 <div>
                   <label className="block text-gray-700 mb-2">Relay Assignment</label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
@@ -578,7 +568,6 @@ const IrrigationScheduler = () => {
                   <p className="text-sm text-gray-500 mt-1">Assign relays to this schedule. A relay can only be assigned to one active schedule.</p>
                 </div>
                 
-                {/* Timeline visualization */}
                 <div>
                   <label className="block text-gray-700 mb-2">Schedule Visualization (24-hour)</label>
                   <Timeline 
@@ -588,7 +577,6 @@ const IrrigationScheduler = () => {
                   />
                 </div>
                 
-                {/* Events list */}
                 <div>
                   <label className="block text-gray-700 mb-2">Events</label>
                   {events.length > 0 ? (
@@ -615,7 +603,6 @@ const IrrigationScheduler = () => {
                   )}
                 </div>
                 
-                {/* Add new event */}
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <h3 className="font-medium mb-3">Add New Event</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -680,7 +667,6 @@ const IrrigationScheduler = () => {
                   </div>
                 </div>
                 
-                {/* Save/Cancel buttons */}
                 <div className="flex justify-end space-x-4 mt-6">
                   <button 
                     onClick={cancelEdit}
@@ -698,27 +684,11 @@ const IrrigationScheduler = () => {
               </div>
             </section>
           )}
-          
-          {/* Schedule Details - Visible only in view mode */}
-          {mode === 'view' && currentSchedule && (
-            <section className="mb-8">
-              <h2 className="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Schedule Details</h2>
-              
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                  <div>
-                    <h3 className="font-medium text-gray-700">Name</h3>
-                    <p>{currentSchedule.name}</p>
-                  </div>
-                  
-                  <div>
-                    <h3 className="font-medium text-gray-700">Lights Schedule</h3>
-                    <p>On: {currentSchedule.lightsOnTime}, Off: {currentSchedule.lightsOffTime}</p>
-                  </div>
-                  
-                  <div>
-                    <h3 className="font-medium text-gray-700">Assigned Relays</h3>
-                    <p>
-                      {getRelaysFromMask(currentSchedule.relayMask).some(r => r) 
-                        ? getRelaysFromMask(currentSchedule.relayMask)
-                            .map((
+        </>
+      )}
+    </div>
+  );
+};
+
+export default IrrigationScheduler;
+ 
