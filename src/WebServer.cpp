@@ -94,13 +94,19 @@ void initWebServer() {
   
   // Initialize Scheduler routes
   initSchedulerRoutes();
-  
+
+  // Explicitly add WebSocket handler
+  server.addHandler(&schedulerWs);
+
   // Initialize Time routes
   initTimeRoutes();
   
   // Initialize Filesystem routes
   initFilesystemRoutes();
-  
+
+  // Initialize Websocket routes
+  // initSchedulerWebSocket(schedulerWs);
+
   // WiFi routes
   server.on("/api/wifi/status", HTTP_GET, handleGetWiFiStatus);
 

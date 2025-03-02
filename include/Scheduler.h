@@ -11,6 +11,9 @@
 #define MAX_SCHEDULES 8
 #define SCHEDULER_TIMEOUT_MS 300000  // 5 minutes (300,000 ms)
 
+// Declare the WebSocket as external so it can be used across files
+extern AsyncWebSocket schedulerWs;
+
 // Event structure
 // Each event represents a single activation at a specific time
 struct Event {

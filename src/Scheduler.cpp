@@ -731,25 +731,34 @@ void initSchedulerWebSocket() {
 
 // Handle WebSocket events
 void handleWebSocketEvent(AsyncWebSocket* webSocket, AsyncWebSocketClient* client, 
-                        AwsEventType type, void* arg, uint8_t* data, size_t len) {
-  switch (type) {
-    case WS_EVT_CONNECT:
-      debugPrintf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
-      break;
-      
-    case WS_EVT_DISCONNECT:
-      debugPrintf("WebSocket client #%u disconnected\n", client->id());
-      // Don't reset session immediately, allow for reconnection
-      break;
-      
-    case WS_EVT_DATA:
-      handleWebSocketMessage(webSocket, client, (AwsFrameInfo*)arg, data, len);
-      break;
-      
-    case WS_EVT_PONG:
-    case WS_EVT_ERROR:
-      break;
-  }
+  AwsEventType type, void* arg, uint8_t* data, size_t len) {
+switch (type) {
+case WS_EVT_CONNECT:
+debugPrintf("WebSocket CONNECT event: Client #%u connected from %s\n", 
+client->id(), client->remoteIP().toString().c_str());
+debugPrintf("WebSocket details - IP: %s, Client ID: %u, Total clients: %d\n", 
+client->remoteIP().toString().c_str(), 
+client->id(), 
+webSocket->count());
+break;
+
+case WS_EVT_DISCONNECT:
+debugPrintf("WebSocket DISCONNECT event: Client #%u disconnected\n", client->id());
+break;
+
+case WS_EVT_DATA:
+debugPrintf("WebSocket DATA event: Received %d bytes from client #%u\n", len, client->id());
+handleWebSocketMessage(webSocket, client, (AwsFrameInfo*)arg, data, len);
+break;
+
+case WS_EVT_PONG:
+debugPrintf("WebSocket PONG event received from client #%u\n", client->id());
+break;
+
+case WS_EVT_ERROR:
+debugPrintf("WebSocket ERROR event for client #%u\n", client ? client->id() : 0);
+break;
+}
 }
 
 // Process WebSocket messages
