@@ -40,86 +40,122 @@ void broadcastSchedulerUpdate();
 void checkSchedulerTimeouts();
 void updateSchedulerWebSocket();
 
+// If timegm is not available on your platform, use this implementation:
+time_t timegm(struct tm *tm) {
+  time_t ret;
+  char *tz;
+  
+  tz = getenv("TZ");
+  setenv("TZ", "", 1);
+  tzset();
+  ret = mktime(tm);
+  if (tz)
+    setenv("TZ", tz, 1);
+  else
+    unsetenv("TZ");
+  tzset();
+  return ret;
+}
+
 // Convert times between local and UTC formats
 String localTimeToUTC(const String& localTime) {
+  // Parse the input time
   int hours, minutes;
-  sscanf(localTime.c_str(), "%d:%d", &hours, &minutes);
+  if (sscanf(localTime.c_str(), "%d:%d", &hours, &minutes) != 2) {
+    debugPrintf("ERROR: Invalid time format: %s\n", localTime.c_str());
+    return localTime; // Return unchanged if format is invalid
+  }
   
   debugPrintf("DEBUG: Converting local time %02d:%02d to UTC\n", hours, minutes);
   
   // Get current time to determine time zone offset
   time_t now = time(NULL);
+  
+  // Get local and UTC time structures
   struct tm localTimeInfo;
   localtime_r(&now, &localTimeInfo);
   
-  struct tm utcTimeInfo;
-  gmtime_r(&now, &utcTimeInfo);
+  // Create a tm structure with today's date but the specified local time
+  struct tm targetLocalTime = localTimeInfo;
+  targetLocalTime.tm_hour = hours;
+  targetLocalTime.tm_min = minutes;
+  targetLocalTime.tm_sec = 0;
   
-  // Calculate the time zone offset in hours
-  int localHour = localTimeInfo.tm_hour;
-  int utcHour = utcTimeInfo.tm_hour;
-  int offset = localHour - utcHour;
+  // Convert local time structure to time_t (seconds since epoch)
+  time_t targetLocalTimeT = mktime(&targetLocalTime);
   
-  // Adjust for day boundary crossings
-  if (offset > 12) offset -= 24;
-  if (offset < -12) offset += 24;
+  // Convert to UTC time structure
+  struct tm targetUtcTime;
+  gmtime_r(&targetLocalTimeT, &targetUtcTime);
   
-  debugPrintf("DEBUG: Local time offset from UTC: %d hours\n", offset);
-  
-  // Convert the input time to UTC
-  int utcHours = hours - offset;
-  
-  // Handle day boundary crossings
-  if (utcHours < 0) utcHours += 24;
-  if (utcHours >= 24) utcHours -= 24;
-  
+  // Format the UTC time as a string
   char buffer[6]; // HH:MM\0
-  sprintf(buffer, "%02d:%02d", utcHours, minutes);
+  sprintf(buffer, "%02d:%02d", targetUtcTime.tm_hour, targetUtcTime.tm_min);
   
   debugPrintf("DEBUG: Converted to UTC time %s\n", buffer);
   return String(buffer);
 }
 
 String utcToLocalTime(const String& utcTime) {
+  // Parse the input time
   int hours, minutes;
-  sscanf(utcTime.c_str(), "%d:%d", &hours, &minutes);
+  if (sscanf(utcTime.c_str(), "%d:%d", &hours, &minutes) != 2) {
+    debugPrintf("ERROR: Invalid time format: %s\n", utcTime.c_str());
+    return utcTime; // Return unchanged if format is invalid
+  }
   
+  debugPrintf("DEBUG: Converting UTC time %02d:%02d to local time\n", hours, minutes);
+  
+  // Get current time
   time_t now = time(NULL);
+  
+  // Get UTC time structure
   struct tm utcTimeInfo;
   gmtime_r(&now, &utcTimeInfo);
   
-  struct tm localTimeInfo;
-  localtime_r(&now, &localTimeInfo);
+  // Create a tm structure with today's date but the specified UTC time
+  struct tm targetUtcTime = utcTimeInfo;
+  targetUtcTime.tm_hour = hours;
+  targetUtcTime.tm_min = minutes;
+  targetUtcTime.tm_sec = 0;
   
-  // Calculate the timezone offset in seconds
-  time_t gmtTime = mktime(&utcTimeInfo);
-  time_t localTime = mktime(&localTimeInfo);
-  int tzOffset = difftime(localTime, gmtTime);
+  // Convert UTC time to time_t using a workaround for timegm
+  // We temporarily change timezone to UTC, call mktime, then restore timezone
+  char* tz = getenv("TZ");
+  setenv("TZ", "", 1);
+  tzset();
+  time_t targetUtcTimeT = mktime(&targetUtcTime);
+  if (tz)
+    setenv("TZ", tz, 1);
+  else
+    unsetenv("TZ");
+  tzset();
   
-  // Create a UTC time point for the specified hours and minutes
-  struct tm targetUtc = utcTimeInfo;
-  targetUtc.tm_hour = hours;
-  targetUtc.tm_min = minutes;
-  targetUtc.tm_sec = 0;
+  // Convert to local time structure
+  struct tm targetLocalTime;
+  localtime_r(&targetUtcTimeT, &targetLocalTime);
   
-  // Convert UTC time to time_t, then apply the timezone offset
-  time_t targetUtcTime = mktime(&targetUtc);
-  time_t targetLocalTime = targetUtcTime + tzOffset;
-  
-  // Convert back to a time structure
-  struct tm targetLocalTm;
-  localtime_r(&targetLocalTime, &targetLocalTm);
-  
-  // Format the time
+  // Format the local time as a string
   char buffer[6]; // HH:MM\0
-  sprintf(buffer, "%02d:%02d", targetLocalTm.tm_hour, targetLocalTm.tm_min);
+  sprintf(buffer, "%02d:%02d", targetLocalTime.tm_hour, targetLocalTime.tm_min);
+  
+  debugPrintf("DEBUG: Converted to local time %s\n", buffer);
   return String(buffer);
 }
+
+bool isValidTimeFormat(const String& timeStr) {
+  int hours, minutes;
+  int parsed = sscanf(timeStr.c_str(), "%d:%d", &hours, &minutes);
+  return (parsed == 2 && hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60);
+}
+
 
 // Initialize the scheduler system
 void initScheduler() {
   debugPrintln("Initializing Scheduler system");
     
+  testTimeConversion();
+  
   // Always start the scheduler task automatically
   startSchedulerTask();
   debugPrintln("Scheduler task started automatically");
@@ -191,8 +227,26 @@ void checkAndExecuteScheduledEvents() {
   struct tm utcTime;
   gmtime_r(&now, &utcTime);
   
-
-
+  static int lastHour = -1;
+  
+  // Print time debug info when the hour changes
+  if (utcTime.tm_hour != lastHour) {
+    char timeStr[64];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &utcTime);
+    debugPrintf("DEBUG: Current UTC time: %s\n", timeStr);
+    
+    struct tm localTime;
+    localtime_r(&now, &localTime);
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &localTime);
+    debugPrintf("DEBUG: Current local time: %s\n", timeStr);
+    
+    lastHour = utcTime.tm_hour;
+  }
+    
+  // Get current time in UTC
+  now = time(NULL);
+  gmtime_r(&now, &utcTime);
+  
   // Only check events if we have active schedules and we're at a new minute
   if (now == lastEventCheckTime || schedulerState.scheduleCount == 0) {
     return;
@@ -2007,4 +2061,47 @@ void immediateExecutionTask(void *pvParameters) {
   
   // Delete this task when done
   vTaskDelete(NULL);
+}
+
+void testTimeConversion() {
+  debugPrintln("\n===== TIME CONVERSION TEST =====");
+  
+  // Get current time
+  time_t now = time(NULL);
+  struct tm localTime, utcTime;
+  localtime_r(&now, &localTime);
+  gmtime_r(&now, &utcTime);
+  
+  // Format for display
+  char localTimeStr[20], utcTimeStr[20];
+  strftime(localTimeStr, sizeof(localTimeStr), "%H:%M:%S", &localTime);
+  strftime(utcTimeStr, sizeof(utcTimeStr), "%H:%M:%S", &utcTime);
+  
+  debugPrintf("Current local time: %s\n", localTimeStr);
+  debugPrintf("Current UTC time: %s\n", utcTimeStr);
+  
+  // Calculate offset
+  int offsetHours = localTime.tm_hour - utcTime.tm_hour;
+  if (offsetHours > 12) offsetHours -= 24;
+  if (offsetHours < -12) offsetHours += 24;
+  
+  debugPrintf("Time zone offset: UTC%+d\n", offsetHours);
+  
+  // Test the conversion functions
+  String testTimes[] = {"00:00", "06:00", "12:00", "18:00", "23:59"};
+  
+  for (const String& time : testTimes) {
+    String utc = localTimeToUTC(time);
+    String back = utcToLocalTime(utc);
+    
+    debugPrintf("Local %s -> UTC %s -> Local %s\n", 
+               time.c_str(), utc.c_str(), back.c_str());
+    
+    // Verify round-trip conversion
+    if (time != back) {
+      debugPrintf("ERROR: Round-trip conversion failed for %s\n", time.c_str());
+    }
+  }
+  
+  debugPrintln("==============================\n");
 }

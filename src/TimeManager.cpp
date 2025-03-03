@@ -204,8 +204,25 @@ void startTimeManagerTask() {
 void handleGetTimeStatus(AsyncWebServerRequest *request) {
   DynamicJsonDocument doc(512);
   
+  // Add time zone info
+  time_t now = time(NULL);
+  struct tm localTime, utcTime;
+  localtime_r(&now, &localTime);
+  gmtime_r(&now, &utcTime);
+
+  // Calculate time zone offset in hours
+  int offsetHours = localTime.tm_hour - utcTime.tm_hour;
+  // Handle day boundary crossings
+  if (offsetHours > 12) offsetHours -= 24;
+  if (offsetHours < -12) offsetHours += 24;
+
+  // Determine DST status
+  bool isDST = localTime.tm_isdst > 0;
+
+  doc["timezoneOffset"] = offsetHours;
+  doc["isDST"] = isDST;
+
   // Get current time
-  time_t now;
   struct tm timeinfo;
   time(&now);
   bool hasTime = getLocalTime(&timeinfo);

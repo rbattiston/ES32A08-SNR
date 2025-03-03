@@ -78,6 +78,7 @@ bool validateTimeFormat(const char* timeStr);
 void debugScheduleEvent(const Event& event, bool executed, int minutesUntil);
 void executeNextScheduledEvent();
 void immediateExecutionTask(void *pvParameters);
+void testTimeConversion();
 
 // Automated scheduler diagnostics
 void schedulerDiagnosticsTask(void *pvParameters);
