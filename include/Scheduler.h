@@ -70,6 +70,17 @@ void executeRelayCommand(uint8_t relay, uint16_t duration);
 void loadSchedulerState();
 void saveSchedulerState();
 void addNewSchedule(const String& name);
+void schedulerMonitorTask(void *pvParameters);
+bool verifyTimeSync();
+void testRelayControl();
+void manuallyTriggerEvent(const char* scheduleName, const char* eventId);
+bool validateTimeFormat(const char* timeStr);
+void debugScheduleEvent(const Event& event, bool executed, int minutesUntil);
+void executeNextScheduledEvent();
+void immediateExecutionTask(void *pvParameters);
+
+// Automated scheduler diagnostics
+void schedulerDiagnosticsTask(void *pvParameters);
 
 // Time conversion utilities
 String localTimeToUTC(const String& localTime);

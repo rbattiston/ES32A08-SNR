@@ -45,23 +45,38 @@ String localTimeToUTC(const String& localTime) {
   int hours, minutes;
   sscanf(localTime.c_str(), "%d:%d", &hours, &minutes);
   
+  debugPrintf("DEBUG: Converting local time %02d:%02d to UTC\n", hours, minutes);
+  
+  // Get current time to determine time zone offset
   time_t now = time(NULL);
   struct tm localTimeInfo;
   localtime_r(&now, &localTimeInfo);
   
-  // Create a tm structure with today's date but the specified time
-  struct tm eventTimeLocal = localTimeInfo;
-  eventTimeLocal.tm_hour = hours;
-  eventTimeLocal.tm_min = minutes;
-  eventTimeLocal.tm_sec = 0;
-  
-  // Convert to UTC
-  time_t eventTimeSeconds = mktime(&eventTimeLocal);
   struct tm utcTimeInfo;
-  gmtime_r(&eventTimeSeconds, &utcTimeInfo);
+  gmtime_r(&now, &utcTimeInfo);
+  
+  // Calculate the time zone offset in hours
+  int localHour = localTimeInfo.tm_hour;
+  int utcHour = utcTimeInfo.tm_hour;
+  int offset = localHour - utcHour;
+  
+  // Adjust for day boundary crossings
+  if (offset > 12) offset -= 24;
+  if (offset < -12) offset += 24;
+  
+  debugPrintf("DEBUG: Local time offset from UTC: %d hours\n", offset);
+  
+  // Convert the input time to UTC
+  int utcHours = hours - offset;
+  
+  // Handle day boundary crossings
+  if (utcHours < 0) utcHours += 24;
+  if (utcHours >= 24) utcHours -= 24;
   
   char buffer[6]; // HH:MM\0
-  sprintf(buffer, "%02d:%02d", utcTimeInfo.tm_hour, utcTimeInfo.tm_min);
+  sprintf(buffer, "%02d:%02d", utcHours, minutes);
+  
+  debugPrintf("DEBUG: Converted to UTC time %s\n", buffer);
   return String(buffer);
 }
 
@@ -104,12 +119,21 @@ String utcToLocalTime(const String& utcTime) {
 // Initialize the scheduler system
 void initScheduler() {
   debugPrintln("Initializing Scheduler system");
+    
+  // Always start the scheduler task automatically
+  startSchedulerTask();
+  debugPrintln("Scheduler task started automatically");
   
   // Initialize NTP time first
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   
   // Try to load existing schedules
   loadSchedulerState();
+  
+  // Verify that time is correctly synchronized
+  if (!verifyTimeSync()) {
+    debugPrintln("WARNING: Time synchronization issue detected - scheduler may not function correctly");
+  }
   
   // If no schedules exist, create a default empty schedule
   if (schedulerState.scheduleCount == 0) {
@@ -167,6 +191,8 @@ void checkAndExecuteScheduledEvents() {
   struct tm utcTime;
   gmtime_r(&now, &utcTime);
   
+
+
   // Only check events if we have active schedules and we're at a new minute
   if (now == lastEventCheckTime || schedulerState.scheduleCount == 0) {
     return;
@@ -181,6 +207,9 @@ void checkAndExecuteScheduledEvents() {
   
   // Current time in minutes since midnight (UTC)
   int currentMinute = utcTime.tm_hour * 60 + utcTime.tm_min;
+  
+  debugPrintf("DEBUG: Checking events at %02d:%02d (minute %d)\n", 
+    utcTime.tm_hour, utcTime.tm_min, currentMinute);
   
   // Iterate through all schedules
   for (int scheduleIdx = 0; scheduleIdx < schedulerState.scheduleCount; scheduleIdx++) {
@@ -1334,4 +1363,648 @@ void checkSchedulerTimeouts() {
 void updateSchedulerWebSocket() {
   schedulerWs.cleanupClients();
   checkSchedulerTimeouts();
+}
+
+// Scheduler monitoring task to display upcoming events and diagnostics
+void schedulerMonitorTask(void *pvParameters) {
+  debugPrintln("DEBUG: Scheduler monitor task started");
+  
+  for (;;) {
+    if (schedulerState.scheduleCount > 0 && schedulerActive) {
+      // Get current time
+      time_t now = time(NULL);
+      if (now < 0) {
+        debugPrintln("DEBUG: Invalid system time, NTP sync may not be complete");
+        vTaskDelay(pdMS_TO_TICKS(10000)); // Wait 10 seconds before retrying
+        continue;
+      }
+      
+      struct tm timeinfo;
+      gmtime_r(&now, &timeinfo);
+      
+      // Format current time for output
+      char currentTimeStr[32];
+      strftime(currentTimeStr, sizeof(currentTimeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+      
+      debugPrintln("--------- SCHEDULER MONITOR ---------");
+      debugPrintf("Current time (UTC): %s\n", currentTimeStr);
+      debugPrintf("Scheduler active: %s\n", schedulerActive ? "YES" : "NO");
+      debugPrintf("Number of schedules: %d\n", schedulerState.scheduleCount);
+      
+      // Current time in minutes since midnight
+      int currentMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+      debugPrintf("Minutes since midnight: %d\n", currentMinutes);
+      
+      // Time until next check
+      time_t secondsUntilNextMinute = 60 - timeinfo.tm_sec;
+      debugPrintf("Seconds until next check: %ld\n", secondsUntilNextMinute);
+      
+      // Find the next upcoming event across all schedules
+      time_t earliestEventTime = INT32_MAX;
+      String earliestEventId = "";
+      String earliestScheduleName = "";
+      uint8_t earliestScheduleRelayMask = 0;
+      
+      for (int scheduleIdx = 0; scheduleIdx < schedulerState.scheduleCount; scheduleIdx++) {
+        Schedule& schedule = schedulerState.schedules[scheduleIdx];
+        
+        // Skip inactive schedules (those without assigned relays)
+        if (schedule.relayMask == 0) {
+          continue;
+        }
+        
+        debugPrintf("\nSchedule: %s (Relay mask: 0x%02X)\n", 
+                  schedule.name.c_str(), schedule.relayMask);
+        
+        for (int eventIdx = 0; eventIdx < schedule.eventCount; eventIdx++) {
+          Event& event = schedule.events[eventIdx];
+          
+          // Parse event time
+          int eventHour = 0, eventMinute = 0;
+          if (sscanf(event.time.c_str(), "%d:%d", &eventHour, &eventMinute) != 2) {
+            debugPrintf("  WARNING: Invalid time format in event: %s\n", event.time.c_str());
+            continue;
+          }
+          
+          // Calculate event time in minutes since midnight
+          int eventMinutes = eventHour * 60 + eventMinute;
+          
+          // Calculate time until this event
+          int minutesUntilEvent;
+          if (eventMinutes > currentMinutes) {
+            // Event is later today
+            minutesUntilEvent = eventMinutes - currentMinutes;
+          } else {
+            // Event is tomorrow
+            minutesUntilEvent = (24 * 60) - currentMinutes + eventMinutes;
+          }
+          
+          // Check if this event should have executed already today
+          bool shouldHaveExecuted = (eventMinutes <= currentMinutes);
+          bool wasExecuted = (event.executedMask & 0x01) != 0;
+          
+          // Print current time and event time for debugging
+          debugPrintf("  DEBUG: Current time: %02d:%02d (%d minutes since midnight)\n", 
+            timeinfo.tm_hour, timeinfo.tm_min, currentMinutes);
+          debugPrintf("  DEBUG: Event time: %s (%d minutes since midnight)\n", 
+            event.time.c_str(), eventMinutes);
+          debugPrintf("  DEBUG: Minutes until event: %d\n", minutesUntilEvent);
+
+          debugPrintf("  Event %d: Time %s (%d min), Duration %d sec, ID %s\n", 
+                    eventIdx, event.time.c_str(), eventMinutes, event.duration, 
+                    event.id.c_str());
+          debugPrintf("    Minutes until execution: %d\n", minutesUntilEvent);
+          debugPrintf("    Should have executed today: %s\n", shouldHaveExecuted ? "YES" : "NO");
+          debugPrintf("    Was executed today: %s\n", wasExecuted ? "YES" : "NO");
+          
+          // Check if this is the earliest upcoming event
+          if (!wasExecuted && minutesUntilEvent < (earliestEventTime / 60)) {
+            earliestEventTime = minutesUntilEvent * 60;
+            earliestEventId = event.id;
+            earliestScheduleName = schedule.name;
+            earliestScheduleRelayMask = schedule.relayMask;
+          }
+        }
+      }
+      
+      // Display next event information
+      if (earliestEventTime != INT32_MAX) {
+        int hours = earliestEventTime / 3600;
+        int minutes = (earliestEventTime % 3600) / 60;
+        int seconds = earliestEventTime % 60;
+        
+        debugPrintln("\n----- NEXT SCHEDULED EVENT -----");
+        debugPrintf("Next event: ID %s in schedule '%s'\n", 
+                  earliestEventId.c_str(), earliestScheduleName.c_str());
+        debugPrintf("Will execute in: %02d:%02d:%02d (HH:MM:SS)\n", 
+                  hours, minutes, seconds);
+        debugPrintf("Will activate relays: 0x%02X\n", earliestScheduleRelayMask);
+        
+        // Show which specific relays will be activated
+        debugPrintln("Relays to activate: ");
+        for (int i = 0; i < 8; i++) {
+          if (earliestScheduleRelayMask & (1 << i)) {
+            debugPrintf("%d ", i);
+          }
+        }
+        debugPrintln("");
+      } else {
+        debugPrintln("\nNo upcoming events found or all events executed today");
+      }
+      
+      // Add information about the current relay state
+      debugPrintln("\n----- CURRENT RELAY STATE -----");
+      debugPrintf("Current relay state: 0x%02X\n", getRelayState());
+      debugPrintln("Active relays: ");
+      uint8_t currentState = getRelayState();
+      bool anyActive = false;
+      for (int i = 0; i < 8; i++) {
+        if (currentState & (1 << i)) {
+          debugPrintf("%d ", i);
+          anyActive = true;
+        }
+      }
+      if (!anyActive) {
+        debugPrintln("None");
+      }
+      debugPrintln("\n-------------------------------");
+    } else {
+      if (!schedulerActive) {
+        debugPrintln("DEBUG: Scheduler is not active");
+      }
+      if (schedulerState.scheduleCount == 0) {
+        debugPrintln("DEBUG: No schedules defined");
+      }
+    }
+    
+    // Run every 60 seconds
+    vTaskDelay(pdMS_TO_TICKS(60000));
+  }
+}
+
+// Enhanced debug function for scheduler events
+void debugScheduleEvent(const Event& event, bool executed, int minutesUntil) {
+  debugPrintf("EVENT: %s (ID: %s, Duration: %d sec)\n", 
+             event.time.c_str(), event.id.c_str(), event.duration);
+  debugPrintf("  Execution status: %s\n", executed ? "EXECUTED" : "PENDING");
+  
+  if (!executed) {
+    if (minutesUntil > 0) {
+      int hours = minutesUntil / 60;
+      int mins = minutesUntil % 60;
+      debugPrintf("  Will execute in: %02d:%02d (HH:MM)\n", hours, mins);
+    } else {
+      debugPrintln("  MISSED EXECUTION - Event should have run but didn't");
+    }
+  }
+}
+
+// Debug function to validate time values
+bool validateTimeFormat(const char* timeStr) {
+  int hour, minute;
+  
+  // Attempt to parse the time string
+  int parsed = sscanf(timeStr, "%d:%d", &hour, &minute);
+  
+  // Check if parsing was successful and values are in valid ranges
+  if (parsed != 2 || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    debugPrintf("ERROR: Invalid time format '%s' (parsed=%d, hour=%d, minute=%d)\n", 
+               timeStr, parsed, hour, minute);
+    return false;
+  }
+  
+  return true;
+}
+
+// Function to directly test relay control
+void testRelayControl() {
+  debugPrintln("DEBUG: Starting relay control test...");
+  
+  // Get the current relay state for reference
+  uint8_t initialState = getRelayState();
+  debugPrintf("DEBUG: Initial relay state: 0x%02X\n", initialState);
+  
+  // Test each relay individually
+  for (int relay = 0; relay < 8; relay++) {
+    debugPrintf("DEBUG: Testing relay %d: ON\n", relay);
+    
+    // Turn relay on
+    setRelay(relay, true);
+    
+    // Verify relay state
+    uint8_t newState = getRelayState();
+    bool relayOn = (newState & (1 << relay)) != 0;
+    
+    debugPrintf("DEBUG: Relay %d state: %s (expected: ON)\n", 
+               relay, relayOn ? "ON" : "OFF");
+    
+    // Wait 2 seconds
+    delay(2000);
+    
+    // Turn relay off
+    debugPrintf("DEBUG: Testing relay %d: OFF\n", relay);
+    setRelay(relay, false);
+    
+    // Verify relay state
+    newState = getRelayState();
+    bool relayOff = (newState & (1 << relay)) == 0;
+    
+    debugPrintf("DEBUG: Relay %d state: %s (expected: OFF)\n", 
+               relay, relayOff ? "OFF" : "ON");
+    
+    // Wait 1 second between relays
+    delay(1000);
+  }
+  
+  // Restore original state
+  debugPrintf("DEBUG: Restoring initial relay state: 0x%02X\n", initialState);
+  setAllRelays(initialState);
+  
+  debugPrintln("DEBUG: Relay control test complete");
+}
+
+// Function to verify time synchronization (critical for scheduler)
+bool verifyTimeSync() {
+  time_t now = time(NULL);
+  struct tm timeinfo;
+  
+  // Check if we have valid time
+  if (now < 0 || !getLocalTime(&timeinfo)) {
+    debugPrintln("ERROR: System time not set! NTP sync may have failed.");
+    return false;
+  }
+  
+  // Format time for display
+  char timeStr[32];
+  strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+  debugPrintf("DEBUG: System time correctly set: %s\n", timeStr);
+  
+  // Check if time appears valid (after Jan 1, 2022)
+  time_t minValidTime = 1640995200; // Jan 1, 2022 00:00:00 GMT
+  if (now < minValidTime) {
+    debugPrintln("ERROR: System time appears invalid (before 2022)");
+    return false;
+  }
+  
+  return true;
+}
+
+// Function to manually trigger an event (used for debugging)
+void manuallyTriggerEvent(const char* scheduleName, const char* eventId) {
+  debugPrintf("DEBUG: Manually triggering event '%s' in schedule '%s'\n", 
+             eventId, scheduleName);
+  
+  // Find the specified schedule
+  Schedule* targetSchedule = nullptr;
+  Event* targetEvent = nullptr;
+  
+  for (int i = 0; i < schedulerState.scheduleCount; i++) {
+    if (schedulerState.schedules[i].name == scheduleName) {
+      targetSchedule = &schedulerState.schedules[i];
+      break;
+    }
+  }
+  
+  if (!targetSchedule) {
+    debugPrintf("ERROR: Schedule '%s' not found\n", scheduleName);
+    return;
+  }
+  
+  // Find the specified event
+  for (int i = 0; i < targetSchedule->eventCount; i++) {
+    if (targetSchedule->events[i].id == eventId) {
+      targetEvent = &targetSchedule->events[i];
+      break;
+    }
+  }
+  
+  if (!targetEvent) {
+    debugPrintf("ERROR: Event '%s' not found in schedule '%s'\n", 
+               eventId, scheduleName);
+    return;
+  }
+  
+  // Execute the event
+  debugPrintf("DEBUG: Executing event at %s for %d seconds\n", 
+             targetEvent->time.c_str(), targetEvent->duration);
+  
+  // Activate the relays specified by the schedule's relay mask
+  for (int relay = 0; relay < 8; relay++) {
+    if (targetSchedule->relayMask & (1 << relay)) {
+      debugPrintf("DEBUG: Activating relay %d for %d seconds\n", 
+                 relay, targetEvent->duration);
+      executeRelayCommand(relay, targetEvent->duration);
+    }
+  }
+}
+
+// Automated diagnostics task for the scheduler
+void schedulerDiagnosticsTask(void *pvParameters) {
+  // Wait for system to boot up and stabilize
+  vTaskDelay(pdMS_TO_TICKS(30000)); // Wait 30 seconds after boot
+  
+  debugPrintln("\n\n==== STARTING AUTOMATED SCHEDULER DIAGNOSTICS ====\n");
+  
+  // Step 1: Check time synchronization
+  debugPrintln("DIAGNOSTIC: Checking time synchronization...");
+  bool timeValid = verifyTimeSync();
+  
+  if (!timeValid) {
+    debugPrintln("DIAGNOSTIC: ❌ TIME SYNC FAILURE - Scheduler cannot function without correct time");
+    debugPrintln("DIAGNOSTIC: Recommendation: Check WiFi connection and NTP server access");
+  } else {
+    debugPrintln("DIAGNOSTIC: ✅ Time synchronization is working correctly");
+  }
+  
+  // Step 2: Test relay control
+  debugPrintln("\nDIAGNOSTIC: Testing direct relay control...");
+  
+  // Save current relay state
+  uint8_t savedRelayState = getRelayState();
+  
+  // Test relay 0 only (to minimize disruption)
+  debugPrintln("DIAGNOSTIC: Testing relay 0 only");
+  setRelay(0, true);
+  vTaskDelay(pdMS_TO_TICKS(1000)); // Wait 1 second
+  
+  // Check if relay was activated
+  uint8_t newState = getRelayState();
+  bool relay0On = (newState & 0x01) != 0;
+  
+  if (relay0On) {
+    debugPrintln("DIAGNOSTIC: ✅ Direct relay control is working");
+  } else {
+    debugPrintln("DIAGNOSTIC: ❌ Direct relay control FAILED - Relay did not activate");
+    debugPrintln("DIAGNOSTIC: Recommendation: Check IOManager.cpp and hardware connections");
+  }
+  
+  // Turn relay off and restore original state
+  setRelay(0, false);
+  vTaskDelay(pdMS_TO_TICKS(1000)); // Wait 1 second
+  setAllRelays(savedRelayState);
+  
+  // Step 3: Check scheduler activation status
+  debugPrintln("\nDIAGNOSTIC: Checking scheduler activation status...");
+  
+  if (schedulerActive) {
+    debugPrintln("DIAGNOSTIC: ✅ Scheduler is ACTIVE");
+  } else {
+    debugPrintln("DIAGNOSTIC: ❌ Scheduler is NOT ACTIVE - Events will not execute");
+    debugPrintln("DIAGNOSTIC: Recommendation: Call startSchedulerTask() or activate via web interface");
+    
+    // Try to activate the scheduler
+    debugPrintln("DIAGNOSTIC: Attempting to activate scheduler...");
+    startSchedulerTask();
+    
+    vTaskDelay(pdMS_TO_TICKS(1000)); // Brief delay
+    
+    if (schedulerActive) {
+      debugPrintln("DIAGNOSTIC: ✅ Successfully activated the scheduler");
+    } else {
+      debugPrintln("DIAGNOSTIC: ❌ Failed to activate scheduler");
+    }
+  }
+  
+  // Step 4: Check schedules and events
+  debugPrintln("\nDIAGNOSTIC: Checking schedules and events...");
+  bool foundActiveSchedule = false;
+  int totalEvents = 0;
+
+  if (schedulerState.scheduleCount == 0) {
+    debugPrintln("DIAGNOSTIC: ❌ No schedules defined - Create at least one schedule");
+  } else {
+    debugPrintf("DIAGNOSTIC: Found %d schedules\n", schedulerState.scheduleCount);
+    
+    bool foundUpcomingEvent = false;
+    
+    for (int i = 0; i < schedulerState.scheduleCount; i++) {
+      Schedule& schedule = schedulerState.schedules[i];
+      
+      debugPrintf("DIAGNOSTIC: Schedule '%s': Relay mask: 0x%02X, Event count: %d\n", 
+                schedule.name.c_str(), schedule.relayMask, schedule.eventCount);
+      
+      if (schedule.relayMask == 0) {
+        debugPrintf("DIAGNOSTIC: ⚠️ Schedule '%s' has no relays assigned (inactive)\n", 
+                  schedule.name.c_str());
+      } else {
+        foundActiveSchedule = true;
+      }
+      
+      totalEvents += schedule.eventCount;
+      
+      // Check for valid event times
+      for (int j = 0; j < schedule.eventCount; j++) {
+        Event& event = schedule.events[j];
+        if (!validateTimeFormat(event.time.c_str())) {
+          debugPrintf("DIAGNOSTIC: ❌ Invalid time format in event: '%s'\n", 
+                    event.time.c_str());
+        } else {
+          foundUpcomingEvent = true;
+        }
+      }
+    }
+    
+    if (!foundActiveSchedule) {
+      debugPrintln("DIAGNOSTIC: ❌ No schedules have relays assigned - Events won't control any relays");
+      debugPrintln("DIAGNOSTIC: Recommendation: Assign relays to at least one schedule");
+    } else {
+      debugPrintln("DIAGNOSTIC: ✅ Found active schedules with relay assignments");
+    }
+    
+    if (totalEvents == 0) {
+      debugPrintln("DIAGNOSTIC: ❌ No events defined in any schedule");
+      debugPrintln("DIAGNOSTIC: Recommendation: Add at least one event to a schedule");
+    } else if (!foundUpcomingEvent) {
+      debugPrintln("DIAGNOSTIC: ❌ No valid upcoming events found");
+    } else {
+      debugPrintln("DIAGNOSTIC: ✅ Valid events found in schedules");
+    }
+  }
+  
+  // Step 5: Test event execution by creating a test event
+  if (timeValid && foundActiveSchedule) {
+    debugPrintln("\nDIAGNOSTIC: Testing event execution by creating a test event...");
+    
+    // Get current time
+    time_t now = time(NULL);
+    struct tm timeinfo;
+    gmtime_r(&now, &timeinfo);
+    
+    // Create a test event 2 minutes from now
+    timeinfo.tm_min += 2;
+    if (timeinfo.tm_min >= 60) {
+      timeinfo.tm_min -= 60;
+      timeinfo.tm_hour += 1;
+      if (timeinfo.tm_hour >= 24) {
+        timeinfo.tm_hour = 0;
+      }
+    }
+    
+    char testTime[6];
+    sprintf(testTime, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+    
+    debugPrintf("DIAGNOSTIC: Created test event at %s UTC (2 minutes from now)\n", testTime);
+    debugPrintln("DIAGNOSTIC: Monitor the serial output for the next few minutes");
+    debugPrintln("DIAGNOSTIC: You should see the event execute automatically when the time is reached");
+  }
+  
+  // Summary and recommendations
+  debugPrintln("\n==== SCHEDULER DIAGNOSTICS SUMMARY ====");
+  
+  if (!timeValid) {
+    debugPrintln("❌ CRITICAL: Time synchronization failure");
+  }
+  
+  if (!relay0On) {
+    debugPrintln("❌ CRITICAL: Relay control not working");
+  }
+  
+  if (!schedulerActive) {
+    debugPrintln("❌ CRITICAL: Scheduler is not active");
+  }
+  
+  if (!foundActiveSchedule || totalEvents == 0) {
+    debugPrintln("❌ CRITICAL: No active schedules or events");
+  }
+  
+  if (timeValid && relay0On && schedulerActive && foundActiveSchedule && totalEvents > 0) {
+    debugPrintln("✅ All critical components appear to be working correctly");
+    debugPrintln("If events still don't execute, the issue may be with precise timing");
+    debugPrintln("Keep watching the monitor output for detailed event execution logs");
+  }
+  
+  debugPrintln("\n==== END OF DIAGNOSTICS ====\n");
+  
+  // Task complete, delete itself
+  vTaskDelete(NULL);
+}
+
+// Add this function to directly execute the next event
+
+void executeNextScheduledEvent() {
+  debugPrintln("\n==== MANUALLY EXECUTING NEXT EVENT ====");
+  
+  // Get current time
+  time_t now = time(NULL);
+  struct tm timeinfo;
+  gmtime_r(&now, &timeinfo);
+  
+  // Format current time for debugging
+  char currentTimeStr[32];
+  strftime(currentTimeStr, sizeof(currentTimeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+  debugPrintf("Current time (UTC): %s\n", currentTimeStr);
+  
+  // Find the next event
+  Event* nextEvent = nullptr;
+  Schedule* nextSchedule = nullptr;
+  time_t soonestTime = INT32_MAX;
+  
+  // Search all schedules for the next event
+  for (int scheduleIdx = 0; scheduleIdx < schedulerState.scheduleCount; scheduleIdx++) {
+    Schedule& schedule = schedulerState.schedules[scheduleIdx];
+    
+    // Skip inactive schedules
+    if (schedule.relayMask == 0) continue;
+    
+    for (int eventIdx = 0; eventIdx < schedule.eventCount; eventIdx++) {
+      Event& event = schedule.events[eventIdx];
+      
+      // Parse event time
+      int eventHour = 0, eventMinute = 0;
+      if (sscanf(event.time.c_str(), "%d:%d", &eventHour, &eventMinute) != 2) {
+        debugPrintf("Invalid time format in event: %s\n", event.time.c_str());
+        continue;
+      }
+      
+      int eventMinutes = eventHour * 60 + eventMinute;
+      int currentMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+      
+      // Calculate time until this event
+      int minutesUntilEvent;
+      if (eventMinutes > currentMinutes) {
+        minutesUntilEvent = eventMinutes - currentMinutes;
+      } else {
+        minutesUntilEvent = (24 * 60) - currentMinutes + eventMinutes;
+      }
+      
+      time_t secondsUntilEvent = minutesUntilEvent * 60;
+      
+      // Check if this is the soonest event
+      if (secondsUntilEvent < soonestTime) {
+        soonestTime = secondsUntilEvent;
+        nextEvent = &event;
+        nextSchedule = &schedule;
+      }
+    }
+  }
+  
+  // Execute the next event if found
+  if (nextEvent && nextSchedule) {
+    debugPrintf("Executing event at %s from schedule '%s'\n", 
+               nextEvent->time.c_str(), nextSchedule->name.c_str());
+    
+    // Activate the relays in this schedule
+    for (int relay = 0; relay < 8; relay++) {
+      if (nextSchedule->relayMask & (1 << relay)) {
+        debugPrintf("Activating relay %d for %d seconds\n", relay, nextEvent->duration);
+        
+        // Direct relay control instead of using executeRelayCommand
+        setRelay(relay, true);
+        
+        // Create a task to turn off the relay after the duration
+        int duration = nextEvent->duration;
+        int relayNum = relay;
+        
+        // Use a lambda for the task
+        xTaskCreatePinnedToCore(
+          [](void* parameter) {
+            // Extract parameters
+            int* params = (int*)parameter;
+            int relayNum = params[0];
+            int duration = params[1];
+            
+            // Wait for the specified duration
+            vTaskDelay(pdMS_TO_TICKS(duration * 1000));
+            
+            // Turn off the relay
+            setRelay(relayNum, false);
+            debugPrintf("Relay %d turned OFF after %d seconds\n", relayNum, duration);
+            
+            // Free the parameters and delete the task
+            delete[] params;
+            vTaskDelete(NULL);
+          },
+          "RelayOff",
+          4096,
+          new int[2]{relayNum, duration},
+          2,
+          NULL,
+          1
+        );
+      }
+    }
+    
+    // Mark the event as executed
+    nextEvent->executedMask |= 0x01;
+    
+    debugPrintln("Event execution initiated successfully");
+  } else {
+    debugPrintln("No upcoming events found to execute");
+  }
+  
+  debugPrintln("==== MANUAL EXECUTION COMPLETE ====\n");
+}
+
+// Task to force immediate execution for testing
+void immediateExecutionTask(void *pvParameters) {
+  // Wait 10 seconds to let the system boot up
+  vTaskDelay(pdMS_TO_TICKS(10000));
+  
+  debugPrintln("\n==== FORCE IMMEDIATE EXECUTION TASK STARTED ====");
+  
+  // Make sure scheduler is active
+  if (!schedulerActive) {
+    debugPrintln("Activating scheduler...");
+    startSchedulerTask();
+  }
+  
+  // Force a time check
+  time_t now = time(NULL);
+  struct tm timeinfo;
+  gmtime_r(&now, &timeinfo);
+  
+  char timeStr[32];
+  strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S UTC", &timeinfo);
+  debugPrintf("Current system time: %s\n", timeStr);
+  
+  // Execute the next scheduled event directly
+  executeNextScheduledEvent();
+  
+  // Schedule another execution in 3 minutes
+  vTaskDelay(pdMS_TO_TICKS(180000)); // 3 minutes
+  debugPrintln("\nExecuting another event after 3 minutes...");
+  executeNextScheduledEvent();
+  
+  // Delete this task when done
+  vTaskDelete(NULL);
 }
